@@ -1,6 +1,6 @@
 # WUPHF
 
-<video src="https://github.com/nex-crm/wuphf/releases/download/v0.1.0/Nex-office.mp4" controls width="100%"></video>
+[![WUPHF Demo](https://img.youtube.com/vi/3oActq_QXgk/maxresdefault.jpg)](https://youtu.be/3oActq_QXgk)
 
 WUPHF is a weird little terminal office for a team of AI coworkers.
 
