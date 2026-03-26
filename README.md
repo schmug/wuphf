@@ -1,5 +1,7 @@
 # WUPHF
 
+<video src="https://github.com/nex-crm/wuphf/releases/download/v0.1.0/Nex-office.mp4" controls width="100%"></video>
+
 WUPHF is a weird little terminal office for a team of AI coworkers.
 
 You run one command, it opens one tmux window, and suddenly you have a CEO, PM, frontend engineer, backend engineer, AI engineer, designer, CMO, and CRO all sitting in the same place arguing about what to build. That is the product.
