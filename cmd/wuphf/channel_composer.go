@@ -40,6 +40,9 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 
 	// ── Composer label ────────────────────────────────────────────────
 	label := fmt.Sprintf("Message #%s", channelName)
+	if strings.HasPrefix(channelName, "1:1 ") {
+		label = channelName
+	}
 	if pending != nil {
 		label = fmt.Sprintf("Answer @%s's question", pending.From)
 	} else if replyToID != "" {
@@ -61,6 +64,9 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 	if len(input) == 0 {
 		cursorStyle := lipgloss.NewStyle().Reverse(true)
 		placeholder := "Type a message... (/ commands, @ mention)"
+		if strings.HasPrefix(channelName, "1:1 ") {
+			placeholder = "Talk directly to your agent here..."
+		}
 		if pending != nil {
 			placeholder = "Type your answer here, or Enter to accept the highlighted option"
 		} else if replyToID != "" {

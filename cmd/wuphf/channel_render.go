@@ -228,6 +228,21 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 	return lines
 }
 
+func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, agentName string) []renderedLine {
+	if len(messages) == 0 {
+		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
+		return []renderedLine{
+			{Text: ""},
+			{Text: mutedStyle.Render("  Direct 1:1 with " + agentName + ".")},
+			{Text: mutedStyle.Render("  There is no office, no channel, and no teammate roster in this mode.")},
+			{Text: ""},
+			{Text: mutedStyle.Render("  Suggested: Help me think through the v1 launch plan.")},
+			{Text: mutedStyle.Render("  This conversation is just you and " + agentName + ".")},
+		}
+	}
+	return buildOfficeMessageLines(messages, expanded, contentWidth, false)
+}
+
 func humanMessageLabel(kind string) string {
 	switch strings.TrimSpace(kind) {
 	case "human_decision":

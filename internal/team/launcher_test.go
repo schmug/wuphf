@@ -72,6 +72,76 @@ func TestResetSessionOnlyClearsOfficeState(t *testing.T) {
 	}
 }
 
+func TestAgentPaneSlugsOneOnOneUsesOnlySelectedAgent(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "pm", Name: "Product Manager"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+		sessionMode: SessionModeOneOnOne,
+		oneOnOne:    "pm",
+	}
+
+	got := l.agentPaneSlugs()
+	if len(got) != 1 || got[0] != "pm" {
+		t.Fatalf("expected only pm in 1o1 pane list, got %v", got)
+	}
+	if l.AgentCount() != 1 {
+		t.Fatalf("expected 1 agent in 1o1 mode, got %d", l.AgentCount())
+	}
+	if !strings.Contains(l.PackName(), "1:1 with") {
+		t.Fatalf("expected 1o1 pack name, got %q", l.PackName())
+	}
+}
+
+func TestNotificationTargetsForMessageOneOnOneWakesSelectedAgent(t *testing.T) {
+	l := &Launcher{
+		sessionMode: SessionModeOneOnOne,
+		oneOnOne:    "pm",
+	}
+
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "you",
+		Channel: "general",
+		Content: "Need a product call here.",
+	})
+
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed targets in 1o1 mode, got %v", delayed)
+	}
+	if len(immediate) != 1 || immediate[0].Slug != "pm" || immediate[0].PaneIndex != 1 {
+		t.Fatalf("expected pm as the only immediate target, got %v", immediate)
+	}
+}
+
+func TestLoadRunningSessionModePrefersLiveBrokerState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("expected auth header, got %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"session_mode":     SessionModeOneOnOne,
+			"one_on_one_agent": "pm",
+		})
+	}))
+	defer server.Close()
+
+	t.Setenv("WUPHF_BROKER_TOKEN", "test-token")
+	t.Setenv("WUPHF_BROKER_BASE_URL", server.URL)
+
+	mode, agent := loadRunningSessionMode()
+	if mode != SessionModeOneOnOne {
+		t.Fatalf("expected live session mode %q, got %q", SessionModeOneOnOne, mode)
+	}
+	if agent != "pm" {
+		t.Fatalf("expected live 1o1 agent pm, got %q", agent)
+	}
+}
+
 func TestFormatNexFeedItem(t *testing.T) {
 	title, content := formatNexFeedItem(nexFeedItem{
 		Type: "context_alert",

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/nex-crm/wuphf/internal/team"
+	"github.com/nex-crm/wuphf/internal/tui"
 )
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -255,6 +257,90 @@ func TestChannelViewUsesOfficeHeaderAndComposer(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "The WUPHF Office") || !strings.Contains(view, "Message #general") {
 		t.Fatalf("expected office chrome, got %q", view)
+	}
+}
+
+func TestChannelViewUsesOneOnOneChrome(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.sessionMode = team.SessionModeOneOnOne
+	m.oneOnOneAgent = "ceo"
+	m.sidebarCollapsed = true
+	m.refreshSlashCommands()
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "1:1 with CEO") {
+		t.Fatalf("expected 1o1 header, got %q", view)
+	}
+	if strings.Contains(view, "The WUPHF Office") || strings.Contains(view, "Message #general") {
+		t.Fatalf("expected office chrome to be hidden in 1o1 mode, got %q", view)
+	}
+}
+
+func TestOneOnOneModeBlocksOfficeCommands(t *testing.T) {
+	m := newChannelModel(false)
+	m.sessionMode = team.SessionModeOneOnOne
+	m.oneOnOneAgent = "ceo"
+	m.refreshSlashCommands()
+
+	next, _ := m.runCommand("/channels", "")
+	got := next.(channelModel)
+	if !strings.Contains(got.notice, "1:1 mode disables office") {
+		t.Fatalf("expected office commands to be blocked in 1o1 mode, got %q", got.notice)
+	}
+}
+
+func TestOneOnOneCommandOpensModePicker(t *testing.T) {
+	m := newChannelModel(false)
+
+	next, cmd := m.runCommand("/1o1", "")
+	if cmd != nil {
+		t.Fatalf("expected no immediate command from /1o1 picker open, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if !got.picker.IsActive() || got.pickerMode != channelPickerOneOnOneMode {
+		t.Fatalf("expected 1o1 mode picker, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "Enable 1:1 mode") || !strings.Contains(view, "Disable 1:1 mode") {
+		t.Fatalf("expected enable/disable options in picker, got %q", view)
+	}
+}
+
+func TestOneOnOnePickerEnableOpensAgentPicker(t *testing.T) {
+	m := newChannelModel(false)
+	m.picker = tui.NewPicker("Direct Session", m.buildOneOnOneModePickerOptions())
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerOneOnOneMode
+
+	next, cmd := m.Update(tui.PickerSelectMsg{Value: "enable"})
+	if cmd != nil {
+		t.Fatalf("expected no immediate command when opening agent picker, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if !got.picker.IsActive() || got.pickerMode != channelPickerOneOnOneAgent {
+		t.Fatalf("expected 1o1 agent picker, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "CEO") {
+		t.Fatalf("expected agent options in picker, got %q", view)
+	}
+}
+
+func TestOneOnOnePickerDisableInOfficeIsNoop(t *testing.T) {
+	m := newChannelModel(false)
+	m.picker = tui.NewPicker("Direct Session", m.buildOneOnOneModePickerOptions())
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerOneOnOneMode
+
+	next, cmd := m.Update(tui.PickerSelectMsg{Value: "disable"})
+	if cmd != nil {
+		t.Fatalf("expected no command when disabling 1:1 from office mode, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if got.notice != "Already running the full office team." {
+		t.Fatalf("expected office noop notice, got %q", got.notice)
 	}
 }
 

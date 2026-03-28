@@ -57,6 +57,42 @@ func TestBrokerPersistsAndReloadsState(t *testing.T) {
 	}
 }
 
+func TestBrokerSessionModePersistsAndSurvivesReset(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.SetSessionMode(SessionModeOneOnOne, "pm"); err != nil {
+		t.Fatalf("SetSessionMode failed: %v", err)
+	}
+	if _, err := b.PostMessage("pm", "general", "hello", nil, ""); err != nil {
+		t.Fatalf("seed direct message: %v", err)
+	}
+
+	reloaded := NewBroker()
+	mode, agent := reloaded.SessionModeState()
+	if mode != SessionModeOneOnOne {
+		t.Fatalf("expected persisted 1o1 mode, got %q", mode)
+	}
+	if agent != "pm" {
+		t.Fatalf("expected persisted 1o1 agent pm, got %q", agent)
+	}
+
+	reloaded.Reset()
+	mode, agent = reloaded.SessionModeState()
+	if mode != SessionModeOneOnOne {
+		t.Fatalf("expected reset to preserve 1o1 mode, got %q", mode)
+	}
+	if agent != "pm" {
+		t.Fatalf("expected reset to preserve 1o1 agent pm, got %q", agent)
+	}
+	if len(reloaded.Messages()) != 0 {
+		t.Fatalf("expected reset to clear direct messages, got %d", len(reloaded.Messages()))
+	}
+}
+
 func TestBrokerMessageKindAndTitleRoundTrip(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
@@ -238,9 +274,24 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("health request failed: %v", err)
 	}
-	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		t.Fatalf("expected 200 on /health, got %d", resp.StatusCode)
+	}
+	var health struct {
+		SessionMode   string `json:"session_mode"`
+		OneOnOneAgent string `json:"one_on_one_agent"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode health: %v", err)
+	}
+	resp.Body.Close()
+	if health.SessionMode != SessionModeOffice {
+		t.Fatalf("expected health to report office mode, got %q", health.SessionMode)
+	}
+	if health.OneOnOneAgent != DefaultOneOnOneAgent {
+		t.Fatalf("expected health to report default 1o1 agent %q, got %q", DefaultOneOnOneAgent, health.OneOnOneAgent)
 	}
 
 	// Messages without auth should be rejected

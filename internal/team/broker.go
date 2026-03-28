@@ -202,6 +202,8 @@ type brokerState struct {
 	Messages          []channelMessage       `json:"messages"`
 	Members           []officeMember         `json:"members,omitempty"`
 	Channels          []teamChannel          `json:"channels,omitempty"`
+	SessionMode       string                 `json:"session_mode,omitempty"`
+	OneOnOneAgent     string                 `json:"one_on_one_agent,omitempty"`
 	Tasks             []teamTask             `json:"tasks,omitempty"`
 	Requests          []humanInterview       `json:"requests,omitempty"`
 	Actions           []officeActionLog      `json:"actions,omitempty"`
@@ -237,6 +239,8 @@ type Broker struct {
 	messages          []channelMessage
 	members           []officeMember
 	channels          []teamChannel
+	sessionMode       string
+	oneOnOneAgent     string
 	tasks             []teamTask
 	requests          []humanInterview
 	actions           []officeActionLog
@@ -311,6 +315,7 @@ func (b *Broker) Start() error {
 func (b *Broker) StartOnPort(port int) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", b.handleHealth) // no auth — used for liveness checks
+	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))
 	mux.HandleFunc("/notifications/nex", b.requireAuth(b.handleNexNotifications))
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
@@ -391,6 +396,9 @@ func (b *Broker) HasBlockingRequest() bool {
 func (b *Broker) EnabledMembers(channel string) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.sessionMode == SessionModeOneOnOne {
+		return []string{b.oneOnOneAgent}
+	}
 	channel = normalizeChannelSlug(channel)
 	if channel == "" {
 		channel = "general"
@@ -551,9 +559,13 @@ func (b *Broker) dueSchedulerJobsLocked(now time.Time) []schedulerJob {
 
 func (b *Broker) Reset() {
 	b.mu.Lock()
+	mode := b.sessionMode
+	agent := b.oneOnOneAgent
 	b.messages = nil
 	b.members = defaultOfficeMembers()
 	b.channels = defaultTeamChannels()
+	b.sessionMode = mode
+	b.oneOnOneAgent = agent
 	b.tasks = nil
 	b.requests = nil
 	b.actions = nil
@@ -566,6 +578,7 @@ func (b *Broker) Reset() {
 	b.notificationSince = ""
 	b.insightsSince = ""
 	b.usage = teamUsageState{Agents: make(map[string]usageTotals)}
+	b.normalizeLoadedStateLocked()
 	_ = b.saveLocked()
 	b.mu.Unlock()
 }
@@ -594,6 +607,8 @@ func (b *Broker) loadState() error {
 	b.messages = state.Messages
 	b.members = state.Members
 	b.channels = state.Channels
+	b.sessionMode = state.SessionMode
+	b.oneOnOneAgent = state.OneOnOneAgent
 	b.tasks = state.Tasks
 	b.requests = state.Requests
 	b.actions = state.Actions
@@ -620,7 +635,7 @@ func (b *Broker) loadState() error {
 
 func (b *Broker) saveLocked() error {
 	path := brokerStatePath()
-	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.scheduler) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) {
+	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.scheduler) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -633,6 +648,8 @@ func (b *Broker) saveLocked() error {
 		Messages:          b.messages,
 		Members:           b.members,
 		Channels:          b.channels,
+		SessionMode:       b.sessionMode,
+		OneOnOneAgent:     b.oneOnOneAgent,
 		Tasks:             b.tasks,
 		Requests:          b.requests,
 		Actions:           b.actions,
@@ -788,6 +805,11 @@ func (b *Broker) ensureDefaultOfficeMembersLocked() {
 }
 
 func (b *Broker) normalizeLoadedStateLocked() {
+	b.sessionMode = NormalizeSessionMode(b.sessionMode)
+	b.oneOnOneAgent = NormalizeOneOnOneAgent(b.oneOnOneAgent)
+	if b.findMemberLocked(b.oneOnOneAgent) == nil {
+		b.oneOnOneAgent = DefaultOneOnOneAgent
+	}
 	seenMembers := make(map[string]struct{}, len(b.members))
 	normalizedMembers := make([]officeMember, 0, len(b.members))
 	for _, member := range b.members {
@@ -888,6 +910,23 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		b.scheduleTaskLifecycleLocked(&b.tasks[i])
 	}
 	b.pendingInterview = firstBlockingRequest(b.requests)
+}
+
+func (b *Broker) SessionModeState() (string, string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.sessionMode, b.oneOnOneAgent
+}
+
+func (b *Broker) SetSessionMode(mode, agent string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sessionMode = NormalizeSessionMode(mode)
+	b.oneOnOneAgent = NormalizeOneOnOneAgent(agent)
+	if b.findMemberLocked(b.oneOnOneAgent) == nil {
+		b.oneOnOneAgent = DefaultOneOnOneAgent
+	}
+	return b.saveLocked()
 }
 
 func (b *Broker) findChannelLocked(slug string) *teamChannel {
@@ -1023,6 +1062,12 @@ func defaultTeamChannelDescription(slug, name string) string {
 func (b *Broker) canAccessChannelLocked(slug, channel string) bool {
 	slug = normalizeActorSlug(slug)
 	channel = normalizeChannelSlug(channel)
+	if b.sessionMode == SessionModeOneOnOne {
+		if slug == "" || slug == "you" || slug == "human" {
+			return true
+		}
+		return slug == b.oneOnOneAgent
+	}
 	if slug == "" || slug == "you" || slug == "human" || slug == "nex" {
 		return true
 	}
@@ -1455,8 +1500,50 @@ func (b *Broker) scheduleRequestLifecycleLocked(req *humanInterview) {
 }
 
 func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
+	b.mu.Lock()
+	mode := b.sessionMode
+	agent := b.oneOnOneAgent
+	b.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok"}`))
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":           "ok",
+		"session_mode":     mode,
+		"one_on_one_agent": agent,
+	})
+}
+
+func (b *Broker) handleSessionMode(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		mode, agent := b.SessionModeState()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"session_mode":     mode,
+			"one_on_one_agent": agent,
+		})
+	case http.MethodPost:
+		var body struct {
+			Mode  string `json:"mode"`
+			Agent string `json:"agent"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := b.SetSessionMode(body.Mode, body.Agent); err != nil {
+			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+			return
+		}
+		mode, agent := b.SessionModeState()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"session_mode":     mode,
+			"one_on_one_agent": agent,
+		})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (b *Broker) handleReset(w http.ResponseWriter, r *http.Request) {
@@ -2502,6 +2589,9 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	messages := make([]channelMessage, 0, len(b.messages))
 	for _, msg := range b.messages {
 		if normalizeChannelSlug(msg.Channel) == channel {
+			if b.sessionMode == SessionModeOneOnOne && msg.From != "you" && msg.From != "human" && msg.From != b.oneOnOneAgent {
+				continue
+			}
 			messages = append(messages, msg)
 		}
 	}
@@ -2563,6 +2653,9 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	members := make(map[string]memberView)
 	if ch := b.findChannelLocked(channel); ch != nil {
 		for _, member := range ch.Members {
+			if b.sessionMode == SessionModeOneOnOne && member != b.oneOnOneAgent {
+				continue
+			}
 			info := memberView{disabled: containsString(ch.Disabled, member)}
 			if office := b.findMemberLocked(member); office != nil {
 				info.name = office.Name
@@ -2573,6 +2666,9 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, msg := range b.messages {
 		if normalizeChannelSlug(msg.Channel) != channel {
+			continue
+		}
+		if b.sessionMode == SessionModeOneOnOne && msg.From != b.oneOnOneAgent {
 			continue
 		}
 		if msg.Kind == "automation" || msg.From == "nex" {

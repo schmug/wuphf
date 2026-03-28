@@ -78,7 +78,9 @@ type channelUsageMsg struct {
 }
 
 type channelHealthMsg struct {
-	Connected bool
+	Connected     bool
+	SessionMode   string
+	OneOnOneAgent string
 }
 
 type brokerMessage struct {
@@ -337,6 +339,7 @@ func newBrokerRequest(method, url string, body io.Reader) (*http.Request, error)
 var channelSlashCommands = []tui.SlashCommand{
 	{Name: "init", Description: "Run setup"},
 	{Name: "integrate", Description: "Connect an integration"},
+	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode"},
 	{Name: "messages", Description: "Show the main office feed"},
 	{Name: "tasks", Description: "Show active work in this channel"},
 	{Name: "channels", Description: "Browse and manage channels"},
@@ -359,6 +362,15 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "quit", Description: "Exit WUPHF"},
 }
 
+var oneOnOneSlashCommands = []tui.SlashCommand{
+	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode"},
+	{Name: "init", Description: "Run setup"},
+	{Name: "integrate", Description: "Connect an integration"},
+	{Name: "cancel", Description: "Exit reply/setup mode"},
+	{Name: "reset", Description: "Reset this direct session"},
+	{Name: "quit", Description: "Exit WUPHF"},
+}
+
 type channelPickerMode string
 
 const (
@@ -375,6 +387,8 @@ const (
 	channelPickerChannels      channelPickerMode = "channels"
 	channelPickerAgents        channelPickerMode = "agents"
 	channelPickerCalendarAgent channelPickerMode = "calendar_agent"
+	channelPickerOneOnOneMode  channelPickerMode = "one_on_one_mode"
+	channelPickerOneOnOneAgent channelPickerMode = "one_on_one_agent"
 )
 
 type officeApp string
@@ -479,6 +493,8 @@ type channelModel struct {
 	threadScroll        int
 	usage               channelUsageState
 	brokerConnected     bool
+	sessionMode         string
+	oneOnOneAgent       string
 	lastCtrlCAt         time.Time
 	quickJumpTarget     quickJumpTarget
 	calendarRange       calendarRange
@@ -493,6 +509,16 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 	manifest, _ := company.LoadManifest()
 	officeMembers := officeMembersFromManifest(manifest)
 	channels := channelInfosFromManifest(manifest)
+	sessionMode := team.SessionModeOffice
+	oneOnOneAgent := ""
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("WUPHF_ONE_ON_ONE")), "1") || strings.EqualFold(strings.TrimSpace(os.Getenv("WUPHF_ONE_ON_ONE")), "true") {
+		sessionMode = team.SessionModeOneOnOne
+		oneOnOneAgent = strings.TrimSpace(os.Getenv("WUPHF_ONE_ON_ONE_AGENT"))
+		if oneOnOneAgent == "" {
+			oneOnOneAgent = team.DefaultOneOnOneAgent
+		}
+		initialApp = officeAppMessages
+	}
 	officeDirectory = make(map[string]officeMemberInfo, len(officeMembers))
 	for _, member := range officeMembers {
 		officeDirectory[member.Slug] = member
@@ -508,6 +534,12 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		calendarRange:        calendarRangeWeek,
 		officeMembers:        officeMembers,
 		channels:             channels,
+		sessionMode:          sessionMode,
+		oneOnOneAgent:        oneOnOneAgent,
+	}
+	if m.isOneOnOne() {
+		m.sidebarCollapsed = true
+		m.autocomplete = tui.NewAutocomplete(oneOnOneSlashCommands)
 	}
 	if config.ResolveNoNex() {
 		m.notice = "Running in office-only mode. Nex tools are disabled for this session."
@@ -519,19 +551,58 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 	return m
 }
 
-func (m channelModel) Init() tea.Cmd {
+func (m channelModel) isOneOnOne() bool {
+	return team.NormalizeSessionMode(m.sessionMode) == team.SessionModeOneOnOne
+}
+
+func (m channelModel) oneOnOneAgentSlug() string {
+	return team.NormalizeOneOnOneAgent(m.oneOnOneAgent)
+}
+
+func (m channelModel) oneOnOneAgentName() string {
+	slug := m.oneOnOneAgentSlug()
+	for _, member := range mergeOfficeMembers(m.officeMembers, m.members, nil) {
+		if member.Slug == slug && strings.TrimSpace(member.Name) != "" {
+			return member.Name
+		}
+	}
+	return displayName(slug)
+}
+
+func (m *channelModel) refreshSlashCommands() {
+	if m.isOneOnOne() {
+		m.autocomplete = tui.NewAutocomplete(oneOnOneSlashCommands)
+		return
+	}
+	m.autocomplete = tui.NewAutocomplete(channelSlashCommands)
+}
+
+func (m channelModel) pollCurrentState() tea.Cmd {
+	if m.isOneOnOne() {
+		return tea.Batch(
+			pollHealth(),
+			pollBroker(m.lastID, m.activeChannel),
+			pollMembers(m.activeChannel),
+			tickChannel(),
+		)
+	}
 	return tea.Batch(
 		pollHealth(),
 		pollChannels(),
 		pollOfficeMembers(),
-		pollBroker("", m.activeChannel),
+		pollBroker(m.lastID, m.activeChannel),
 		pollMembers(m.activeChannel),
 		pollRequests(m.activeChannel),
 		pollTasks(m.activeChannel),
 		pollOfficeLedger(),
-
+		pollUsage(),
 		tickChannel(),
 	)
+}
+
+func (m channelModel) Init() tea.Cmd {
+	m.lastID = ""
+	return m.pollCurrentState()
 }
 
 func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -656,9 +727,16 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "Press Ctrl+C again to quit WUPHF."
 			return m, nil
 		case "ctrl+b":
+			if m.isOneOnOne() {
+				return m, nil
+			}
 			m.sidebarCollapsed = !m.sidebarCollapsed
 			return m, nil
 		case "ctrl+g":
+			if m.isOneOnOne() {
+				m.notice = "1:1 mode has no channel sidebar."
+				return m, nil
+			}
 			if m.quickJumpTarget == quickJumpChannels {
 				m.quickJumpTarget = quickJumpNone
 			} else {
@@ -667,6 +745,10 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "ctrl+o":
+			if m.isOneOnOne() {
+				m.notice = "1:1 mode is just the direct conversation."
+				return m, nil
+			}
 			if m.quickJumpTarget == quickJumpApps {
 				m.quickJumpTarget = quickJumpNone
 			} else {
@@ -1143,6 +1225,26 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelHealthMsg:
 		m.brokerConnected = msg.Connected
+		if msg.Connected {
+			nextMode := team.NormalizeSessionMode(msg.SessionMode)
+			nextAgent := team.NormalizeOneOnOneAgent(msg.OneOnOneAgent)
+			modeChanged := nextMode != m.sessionMode || nextAgent != m.oneOnOneAgent
+			m.sessionMode = nextMode
+			m.oneOnOneAgent = nextAgent
+			if m.isOneOnOne() {
+				m.activeApp = officeAppMessages
+				m.sidebarCollapsed = true
+				m.threadPanelOpen = false
+				m.threadPanelID = ""
+				m.replyToID = ""
+			}
+			if modeChanged {
+				m.refreshSlashCommands()
+				if m.isOneOnOne() {
+					m.notice = "Direct 1:1 with " + m.oneOnOneAgentName() + "."
+				}
+			}
+		}
 
 	case channelTasksMsg:
 		m.tasks = msg.tasks
@@ -1241,6 +1343,39 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = "Filtering calendar for " + displayName(m.calendarFilter) + "."
 			}
 			return m, nil
+		case channelPickerOneOnOneMode:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			switch strings.TrimSpace(msg.Value) {
+			case "enable":
+				options := m.buildOneOnOneAgentPickerOptions()
+				if len(options) == 0 {
+					m.notice = "No office agents are available for direct mode."
+					return m, nil
+				}
+				m.picker = tui.NewPicker("Choose Direct Agent", options)
+				m.picker.SetActive(true)
+				m.pickerMode = channelPickerOneOnOneAgent
+				return m, nil
+			case "disable":
+				if !m.isOneOnOne() {
+					m.notice = "Already running the full office team."
+					return m, nil
+				}
+				m.posting = true
+				return m, switchSessionMode(team.SessionModeOffice, team.DefaultOneOnOneAgent)
+			default:
+				return m, nil
+			}
+		case channelPickerOneOnOneAgent:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			agent := strings.TrimSpace(msg.Value)
+			if agent == "" {
+				agent = team.DefaultOneOnOneAgent
+			}
+			m.posting = true
+			return m, switchSessionMode(team.SessionModeOneOnOne, agent)
 		case channelPickerTasks:
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
@@ -1394,19 +1529,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case channelTickMsg:
-		return m, tea.Batch(
-			pollHealth(),
-			pollChannels(),
-			pollOfficeMembers(),
-			pollBroker(m.lastID, m.activeChannel),
-			pollMembers(m.activeChannel),
-			pollRequests(m.activeChannel),
-			pollTasks(m.activeChannel),
-			pollOfficeLedger(),
-			pollUsage(),
-
-			tickChannel(),
-		)
+		return m, m.pollCurrentState()
 	}
 
 	return m, nil
@@ -1417,17 +1540,17 @@ func (m channelModel) View() string {
 		return "Loading..."
 	}
 
-	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	layout := computeLayout(m.width, m.height, m.threadPanelOpen && !m.isOneOnOne(), m.sidebarCollapsed || m.isOneOnOne())
 
 	// ── Sidebar ──────────────────────────────────────────────────────
 	sidebar := ""
-	if layout.ShowSidebar {
+	if layout.ShowSidebar && !m.isOneOnOne() {
 		sidebar = renderSidebar(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.activeChannel, m.activeApp, m.sidebarCursor, m.sidebarRosterOffset, m.focus == focusSidebar, m.quickJumpTarget, m.brokerConnected, layout.SidebarW, layout.ContentH)
 	}
 
 	// ── Thread panel ─────────────────────────────────────────────────
 	thread := ""
-	if layout.ShowThread {
+	if layout.ShowThread && !m.isOneOnOne() {
 		threadPopup := ""
 		if m.focus == focusThread {
 			threadPopup = m.renderActivePopup(maxInt(layout.ThreadW-4, 24))
@@ -1477,7 +1600,7 @@ func (m channelModel) View() string {
 
 	// Composer
 	typingAgents := typingAgentsFromMembers(m.members)
-	composerStr := renderComposer(mainW, m.input, m.inputPos, m.activeChannel,
+	composerStr := renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
 		m.replyToID, typingAgents, activePending, m.selectedOption,
 		m.focus == focusMain)
 	if m.memberDraft != nil {
@@ -1614,6 +1737,18 @@ func (m channelModel) View() string {
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(" " + m.notice),
 		)
+	} else if m.isOneOnOne() {
+		label := "offline preview"
+		if m.brokerConnected {
+			label = "direct session live"
+		}
+		statusBar = statusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
+				fmt.Sprintf(" %s │ %d msgs │ direct with %s │ /1o1 @agent to switch │ /quit",
+					label, len(m.messages), m.oneOnOneAgentName(),
+				),
+			),
+		)
 	} else if !m.brokerConnected {
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(" Team offline │ showing manifest roster │ launch WUPHF to connect"),
@@ -1644,6 +1779,9 @@ func (m channelModel) View() string {
 }
 
 func (m channelModel) currentHeaderTitle() string {
+	if m.isOneOnOne() {
+		return "1:1 with " + m.oneOnOneAgentName()
+	}
 	switch m.activeApp {
 	case officeAppTasks:
 		return "# " + m.activeChannel + " · Tasks"
@@ -1659,6 +1797,12 @@ func (m channelModel) currentHeaderTitle() string {
 }
 
 func (m channelModel) currentHeaderMeta() string {
+	if m.isOneOnOne() {
+		if !m.brokerConnected {
+			return "  Direct session preview · only this agent can speak here"
+		}
+		return "  Direct conversation only · no channels, teammates, or office apps in this mode"
+	}
 	switch m.activeApp {
 	case officeAppTasks:
 		open, inProgress, review, blocked, overdue := 0, 0, 0, 0, 0
@@ -1730,6 +1874,9 @@ func (m channelModel) currentHeaderMeta() string {
 }
 
 func (m channelModel) currentAppLabel() string {
+	if m.isOneOnOne() {
+		return "messages"
+	}
 	switch m.activeApp {
 	case officeAppTasks:
 		return "tasks"
@@ -1745,6 +1892,9 @@ func (m channelModel) currentAppLabel() string {
 }
 
 func (m channelModel) currentMainLines(contentWidth int) []renderedLine {
+	if m.isOneOnOne() {
+		return buildOneOnOneMessageLines(m.messages, m.expandedThreads, contentWidth, m.oneOnOneAgentName())
+	}
 	switch m.activeApp {
 	case officeAppTasks:
 		return buildTaskLines(m.tasks, contentWidth)
@@ -1947,7 +2097,7 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 
 	activePending := m.visiblePendingRequest()
 	typingAgents := typingAgentsFromMembers(m.members)
-	composerStr := renderComposer(mainW, m.input, m.inputPos, m.activeChannel,
+	composerStr := renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
 		m.replyToID, typingAgents, activePending, m.selectedOption,
 		m.focus == focusMain)
 	if m.memberDraft != nil {
@@ -1994,6 +2144,13 @@ func (m channelModel) visiblePendingRequest() *channelInterview {
 		return nil
 	}
 	return m.pending
+}
+
+func (m channelModel) composerTargetLabel() string {
+	if m.isOneOnOne() {
+		return "1:1 with " + m.oneOnOneAgentName()
+	}
+	return m.activeChannel
 }
 
 func (m channelModel) recommendedOptionIndex() int {
@@ -2257,6 +2414,9 @@ type sidebarItem struct {
 }
 
 func (m channelModel) sidebarItems() []sidebarItem {
+	if m.isOneOnOne() {
+		return nil
+	}
 	items := make([]sidebarItem, 0, len(m.channels)+5)
 	items = append(items, m.channelSidebarItems()...)
 	items = append(items, m.appSidebarItems()...)
@@ -3223,15 +3383,47 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.updateInputOverlays()
 	}
 
+	if m.isOneOnOne() && strings.HasPrefix(trimmed, "/") {
+		switch {
+		case trimmed == "/quit" || trimmed == "/exit" || trimmed == "/q":
+		case trimmed == "/reset":
+		case trimmed == "/init":
+		case trimmed == "/integrate":
+		case trimmed == "/cancel":
+		case strings.HasPrefix(trimmed, "/1o1"):
+		default:
+			m.notice = "1:1 mode disables office, channel, agent, task, and thread commands. Quit and relaunch WUPHF for the full office."
+			return m, nil
+		}
+	}
+
 	switch {
 	case trimmed == "/quit" || trimmed == "/exit" || trimmed == "/q":
 		killTeamSession()
 		return m, tea.Quit
+	case trimmed == "/1o1":
+		clearCurrent()
+		m.picker = tui.NewPicker("Direct Session", m.buildOneOnOneModePickerOptions())
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerOneOnOneMode
+		return m, nil
+	case strings.HasPrefix(trimmed, "/1o1 "):
+		clearCurrent()
+		agent := strings.TrimSpace(strings.TrimPrefix(trimmed, "/1o1"))
+		if agent == "" {
+			agent = team.DefaultOneOnOneAgent
+		}
+		m.posting = true
+		return m, switchSessionMode(team.SessionModeOneOnOne, agent)
 	case trimmed == "/messages" || trimmed == "/general":
 		clearCurrent()
 		m.activeApp = officeAppMessages
 		m.syncSidebarCursorToActive()
-		m.notice = "Viewing #general."
+		if m.isOneOnOne() {
+			m.notice = "Viewing your direct session."
+		} else {
+			m.notice = "Viewing #general."
+		}
 		return m, nil
 	case trimmed == "/tasks":
 		clearCurrent()
@@ -3270,7 +3462,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		clearCurrent()
 		m.notice = ""
 		m.posting = true
-		return m, resetTeamSession()
+		return m, resetTeamSession(m.isOneOnOne())
 	case trimmed == "/integrate":
 		clearCurrent()
 		if config.ResolveNoNex() {
@@ -3842,6 +4034,49 @@ func (m channelModel) buildAgentPickerOptions() []tui.PickerOption {
 	return options
 }
 
+func (m channelModel) buildOneOnOneModePickerOptions() []tui.PickerOption {
+	enableDescription := "Restart WUPHF in direct mode with one selected agent and kill the rest of the Claude sessions"
+	if m.isOneOnOne() {
+		enableDescription = "Pick a different single agent for this direct session"
+	}
+	disableDescription := "Restart WUPHF with the full office team"
+	if !m.isOneOnOne() {
+		disableDescription = "Already using the full office team"
+	}
+	return []tui.PickerOption{
+		{
+			Label:       "Enable 1:1 mode",
+			Value:       "enable",
+			Description: enableDescription,
+		},
+		{
+			Label:       "Disable 1:1 mode",
+			Value:       "disable",
+			Description: disableDescription,
+		},
+	}
+}
+
+func (m channelModel) buildOneOnOneAgentPickerOptions() []tui.PickerOption {
+	options := make([]tui.PickerOption, 0, len(m.officeMembers))
+	for _, member := range m.officeMembers {
+		name := member.Name
+		if strings.TrimSpace(name) == "" {
+			name = displayName(member.Slug)
+		}
+		description := strings.TrimSpace(member.Role)
+		if description == "" {
+			description = "Direct session with " + name
+		}
+		options = append(options, tui.PickerOption{
+			Label:       name,
+			Value:       member.Slug,
+			Description: description,
+		})
+	}
+	return options
+}
+
 func (m channelModel) buildCalendarAgentPickerOptions() []tui.PickerOption {
 	options := []tui.PickerOption{{
 		Label:       "All teammates",
@@ -3874,7 +4109,22 @@ func pollHealth() tea.Cmd {
 			return channelHealthMsg{}
 		}
 		defer resp.Body.Close()
-		return channelHealthMsg{Connected: resp.StatusCode == http.StatusOK}
+		if resp.StatusCode != http.StatusOK {
+			return channelHealthMsg{}
+		}
+		var result struct {
+			Status        string `json:"status"`
+			SessionMode   string `json:"session_mode"`
+			OneOnOneAgent string `json:"one_on_one_agent"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return channelHealthMsg{Connected: true}
+		}
+		return channelHealthMsg{
+			Connected:     true,
+			SessionMode:   result.SessionMode,
+			OneOnOneAgent: result.OneOnOneAgent,
+		}
 	}
 }
 
@@ -4209,7 +4459,6 @@ func pollRequests(channel string) tea.Cmd {
 	}
 }
 
-
 func postHumanInterrupt(channel string) tea.Cmd {
 	return func() tea.Msg {
 		body, _ := json.Marshal(map[string]any{
@@ -4345,7 +4594,7 @@ func connectIntegration(spec channelIntegrationSpec) tea.Cmd {
 	}
 }
 
-func resetTeamSession() tea.Cmd {
+func resetTeamSession(oneOnOne bool) tea.Cmd {
 	return func() tea.Msg {
 		// Clear broker + Claude resume state and then rebuild the visible
 		// team panes in place so reset does not leave dead panes behind.
@@ -4359,7 +4608,57 @@ func resetTeamSession() tea.Cmd {
 		if err := l.ReconfigureSession(); err != nil {
 			return channelResetDoneMsg{err: err}
 		}
+		if oneOnOne {
+			return channelResetDoneMsg{notice: "Direct session reset. Agent pane reloaded in place."}
+		}
 		return channelResetDoneMsg{notice: "Office reset. Team panes reloaded in place."}
+	}
+}
+
+func switchSessionMode(mode, agent string) tea.Cmd {
+	return func() tea.Msg {
+		body, _ := json.Marshal(map[string]any{
+			"mode":  mode,
+			"agent": agent,
+		})
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/session-mode", bytes.NewReader(body))
+		if err != nil {
+			return channelResetDoneMsg{err: err}
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return channelResetDoneMsg{err: err}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			raw, _ := io.ReadAll(resp.Body)
+			return channelResetDoneMsg{err: fmt.Errorf("%s", strings.TrimSpace(string(raw)))}
+		}
+		var result struct {
+			SessionMode   string `json:"session_mode"`
+			OneOnOneAgent string `json:"one_on_one_agent"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			result.SessionMode = mode
+			result.OneOnOneAgent = agent
+		}
+
+		l, err := team.NewLauncher("")
+		if err != nil {
+			return channelResetDoneMsg{err: err}
+		}
+		if err := l.ResetSession(); err != nil {
+			return channelResetDoneMsg{err: err}
+		}
+		if err := l.ReconfigureSession(); err != nil {
+			return channelResetDoneMsg{err: err}
+		}
+		switch team.NormalizeSessionMode(result.SessionMode) {
+		case team.SessionModeOneOnOne:
+			return channelResetDoneMsg{notice: "Direct 1:1 with " + displayName(team.NormalizeOneOnOneAgent(result.OneOnOneAgent)) + " is ready."}
+		default:
+			return channelResetDoneMsg{notice: "Office mode is ready."}
+		}
 	}
 }
 

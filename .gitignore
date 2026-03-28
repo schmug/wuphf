@@ -9,3 +9,4 @@
 
 # Dependency installs
 **/node_modules/
+.gstack/

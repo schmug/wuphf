@@ -49,3 +49,10 @@ func TestSuppressBroadcastReasonBlocksAfterUntargetedCEOReply(t *testing.T) {
 		t.Fatal("expected untargeted post-CEO specialist reply to be suppressed")
 	}
 }
+
+func TestIsOneOnOneModeFromEnv(t *testing.T) {
+	t.Setenv("WUPHF_ONE_ON_ONE", "1")
+	if !isOneOnOneMode() {
+		t.Fatal("expected 1o1 env to enable direct mode")
+	}
+}

@@ -23,6 +23,7 @@ func main() {
 	apiKeyFlag := flag.String("api-key", "", "API key for authentication")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	packFlag := flag.String("pack", "", "Agent pack (founding-team, coding-team, lead-gen-agency)")
+	oneOnOne := flag.Bool("1o1", false, "Launch a direct 1:1 session with a single agent (default ceo)")
 	channelView := flag.Bool("channel-view", false, "Run as channel view (internal)")
 	channelApp := flag.String("channel-app", "", "Start channel view on a specific app (internal)")
 	threadsCollapsed := flag.Bool("threads-collapsed", false, "Start with threads collapsed (default: expanded)")
@@ -104,15 +105,23 @@ func main() {
 		return
 	}
 
-	// Default: launch multi-agent team
-	runTeam(nil, *packFlag, *unsafeMode)
+	// Default: launch team or direct 1:1
+	runTeam(args, *packFlag, *unsafeMode, *oneOnOne)
 }
 
-func runTeam(args []string, packSlug string, unsafe bool) {
+func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool) {
 	l, err := team.NewLauncher(packSlug)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
+	}
+
+	if oneOnOne {
+		agentSlug := team.DefaultOneOnOneAgent
+		if len(args) > 0 {
+			agentSlug = args[0]
+		}
+		l.SetOneOnOne(agentSlug)
 	}
 
 	if unsafe {

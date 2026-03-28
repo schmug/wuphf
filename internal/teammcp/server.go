@@ -260,13 +260,27 @@ func Run(ctx context.Context) error {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_broadcast",
-		Description: "Post a message into the shared team channel so the human and every agent can see it.",
+		Description: "Post a message into the current conversation. In 1:1 mode this is the direct chat with the human.",
 	}, handleTeamBroadcast)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_poll",
-		Description: "Read recent messages from the shared team channel so you can stay in sync with teammates.",
+		Description: "Read recent messages from the current conversation so you stay in sync before replying.",
 	}, handleTeamPoll)
+
+	if isOneOnOneMode() {
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "human_interview",
+			Description: "Ask the human a blocking interview question when you truly cannot proceed responsibly without a decision.",
+		}, handleHumanInterview)
+
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "human_message",
+			Description: "Send a direct human-facing note into the chat when you need to present completion, recommend a decision, or tell the human what they should do next.",
+		}, handleHumanMessage)
+
+		return server.Run(ctx, &mcp.StdioTransport{})
+	}
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_status",
@@ -349,16 +363,18 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 	channel := resolveChannel(args.Channel)
 
 	replyTo := strings.TrimSpace(args.ReplyToID)
-	if replyTo == "" && !args.NewTopic {
+	if !isOneOnOneMode() && replyTo == "" && !args.NewTopic {
 		replyTo, _ = inferReplyTarget(ctx, slug, channel)
 	}
-	if replyTo == "" && !args.NewTopic {
+	if !isOneOnOneMode() && replyTo == "" && !args.NewTopic {
 		replyTo, _ = inferDefaultThreadTarget(ctx, slug, channel)
 	}
 
-	if messages, tasks, err := fetchBroadcastContext(ctx, channel, slug); err == nil {
-		if reason := suppressBroadcastReason(slug, args.Content, replyTo, messages, tasks); reason != "" {
-			return textResult(fmt.Sprintf("Held reply for @%s: %s. Poll again if the thread changes or if the CEO tags you in.", slug, reason)), nil, nil
+	if !isOneOnOneMode() {
+		if messages, tasks, err := fetchBroadcastContext(ctx, channel, slug); err == nil {
+			if reason := suppressBroadcastReason(slug, args.Content, replyTo, messages, tasks); reason != "" {
+				return textResult(fmt.Sprintf("Held reply for @%s: %s. Poll again if the thread changes or if the CEO tags you in.", slug, reason)), nil, nil
+			}
 		}
 	}
 
@@ -377,6 +393,9 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 	}
 
 	text := fmt.Sprintf("Posted to #%s as @%s", channel, slug)
+	if isOneOnOneMode() {
+		text = fmt.Sprintf("Sent direct reply to the human as @%s", slug)
+	}
 	if result.ID != "" {
 		text += " (" + result.ID + ")"
 	}
@@ -601,6 +620,12 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 	}
 
 	summary := formatMessages(result.Messages, resolveSlugOptional(args.MySlug))
+	if isOneOnOneMode() {
+		if strings.TrimSpace(summary) == "" {
+			return textResult("The 1:1 is quiet right now."), nil, nil
+		}
+		return textResult("Direct conversation\n\n" + summary), nil, nil
+	}
 	taskSummary := formatTaskSummary(ctx, resolveSlugOptional(args.MySlug), channel)
 	requestSummary := formatRequestSummary(ctx, channel)
 	return textResult(fmt.Sprintf("Channel #%s\n\n%s\n\nTagged messages for you: %d\n\n%s\n\n%s", channel, summary, result.TaggedCount, taskSummary, requestSummary)), nil, nil
@@ -1179,6 +1204,11 @@ func readBrokerTokenFile() string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+func isOneOnOneMode() bool {
+	value := strings.TrimSpace(os.Getenv("WUPHF_ONE_ON_ONE"))
+	return strings.EqualFold(value, "1") || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes")
 }
 
 func resolveSlug(input string) (string, error) {

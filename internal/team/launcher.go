@@ -92,10 +92,17 @@ type Launcher struct {
 	broker      *Broker
 	mcpConfig   string
 	unsafe      bool
+	sessionMode string
+	oneOnOne    string
 }
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
 func (l *Launcher) SetUnsafe(v bool) { l.unsafe = v }
+
+func (l *Launcher) SetOneOnOne(slug string) {
+	l.sessionMode = SessionModeOneOnOne
+	l.oneOnOne = NormalizeOneOnOneAgent(slug)
+}
 
 // NewLauncher creates a launcher for the given pack.
 func NewLauncher(packSlug string) (*Launcher, error) {
@@ -116,12 +123,15 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	if err != nil {
 		return nil, err
 	}
+	sessionMode, oneOnOne := loadRunningSessionMode()
 
 	return &Launcher{
 		packSlug:    packSlug,
 		pack:        pack,
 		sessionName: SessionName,
 		cwd:         cwd,
+		sessionMode: sessionMode,
+		oneOnOne:    oneOnOne,
 	}, nil
 }
 
@@ -151,6 +161,9 @@ func (l *Launcher) Launch() error {
 
 	// Start the shared channel broker
 	l.broker = NewBroker()
+	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
+		return fmt.Errorf("set session mode: %w", err)
+	}
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}
@@ -166,7 +179,16 @@ func (l *Launcher) Launch() error {
 
 	// Window 0 "team": channel on the left
 	// Pass broker token via env so channel view + agents can authenticate
-	channelCmd := fmt.Sprintf("WUPHF_BROKER_TOKEN=%s %s --channel-view 2>>%s", l.broker.Token(), wuphfBinary, shellQuote(channelStderrLogPath()))
+	channelEnv := []string{
+		fmt.Sprintf("WUPHF_BROKER_TOKEN=%s", l.broker.Token()),
+	}
+	if l.isOneOnOne() {
+		channelEnv = append(channelEnv,
+			"WUPHF_ONE_ON_ONE=1",
+			fmt.Sprintf("WUPHF_ONE_ON_ONE_AGENT=%s", l.oneOnOneAgent()),
+		)
+	}
+	channelCmd := fmt.Sprintf("%s %s --channel-view 2>>%s", strings.Join(channelEnv, " "), wuphfBinary, shellQuote(channelStderrLogPath()))
 	err = exec.Command("tmux", "-L", tmuxSocketName, "new-session", "-d",
 		"-s", l.sessionName,
 		"-n", "team",
@@ -245,10 +267,12 @@ func (l *Launcher) Launch() error {
 	go l.watchChannelPaneLoop(channelCmd)
 	go l.primeVisibleAgents()
 	go l.notifyAgentsLoop()
-	go l.notifyTaskActionsLoop()
-	go l.pollNexNotificationsLoop()
-	go l.pollNexInsightsLoop()
-	go l.watchdogSchedulerLoop()
+	if !l.isOneOnOne() {
+		go l.notifyTaskActionsLoop()
+		go l.pollNexNotificationsLoop()
+		go l.pollNexInsightsLoop()
+		go l.watchdogSchedulerLoop()
+	}
 
 	return nil
 }
@@ -583,6 +607,13 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 	slugs := l.agentPaneSlugs()
 	if len(slugs) == 0 {
 		return nil, nil
+	}
+	if l.isOneOnOne() {
+		slug := l.oneOnOneAgent()
+		if slug == "" || slug == msg.From {
+			return nil, nil
+		}
+		return []notificationTarget{{PaneIndex: 1, Slug: slug}}, nil
 	}
 	lead := l.officeLeadSlug()
 	domain := inferMessageDomain(msg)
@@ -1443,6 +1474,9 @@ func humanizeNotificationType(kind string) string {
 }
 
 func (l *Launcher) agentPaneSlugs() []string {
+	if l.isOneOnOne() {
+		return []string{l.oneOnOneAgent()}
+	}
 	if l.pack != nil && len(l.pack.Agents) > 0 {
 		lead := l.pack.LeadSlug
 		if strings.TrimSpace(lead) == "" {
@@ -1476,6 +1510,22 @@ func (l *Launcher) agentPaneSlugs() []string {
 		slugs = append(slugs, member.Slug)
 	}
 	return slugs
+}
+
+func (l *Launcher) isOneOnOne() bool {
+	if l.broker != nil {
+		mode, _ := l.broker.SessionModeState()
+		return mode == SessionModeOneOnOne
+	}
+	return NormalizeSessionMode(l.sessionMode) == SessionModeOneOnOne
+}
+
+func (l *Launcher) oneOnOneAgent() string {
+	if l.broker != nil {
+		_, agent := l.broker.SessionModeState()
+		return NormalizeOneOnOneAgent(agent)
+	}
+	return NormalizeOneOnOneAgent(l.oneOnOne)
 }
 
 // killStaleBroker kills any process holding port 7890 from a previous run.
@@ -1582,6 +1632,18 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 	// Respawn each agent pane in place, preserving layout.
 	// Never clear+recreate panes — that destroys the channel's layout.
 	slugs := l.agentPaneSlugs()
+	if len(panes) != len(slugs) {
+		if err := l.clearAgentPanes(); err != nil {
+			return err
+		}
+		if _, err := l.spawnVisibleAgents(); err != nil {
+			return err
+		}
+		if l.broker != nil {
+			go l.primeVisibleAgents()
+		}
+		return nil
+	}
 
 	for _, idx := range panes {
 		// Map pane index to agent slug (pane 1 = first agent, etc.)
@@ -1614,10 +1676,18 @@ func (l *Launcher) sendChannelUpdate(paneIdx int, slug, channel, msgID, from, co
 	if strings.TrimSpace(channel) == "" {
 		channel = "general"
 	}
-	notification := fmt.Sprintf(
-		"[Channel update #%s %s from @%s]: %s — Before you say anything, call team_poll with my_slug \"%s\" and channel \"%s\" and read the latest channel plus task ownership. If someone already answered well or this is outside your domain, stay quiet. If you are directly responding, reply in-thread with team_broadcast channel \"%s\" reply_to_id \"%s\".",
-		channel, msgID, from, truncate(content, 150), slug, channel, channel, msgID,
-	)
+	notification := ""
+	if l.isOneOnOne() {
+		notification = fmt.Sprintf(
+			"[Direct update %s from @%s]: %s — Call team_poll with my_slug \"%s\" and channel \"%s\", read the latest 1:1 exchange, and if you can answer the human directly, do that now. Use team_broadcast channel \"%s\" reply_to_id \"%s\" for the normal reply, or human_message if you are presenting completion or a recommendation. Do not disappear into a long research loop unless the answer truly depends on it.",
+			msgID, from, truncate(content, 150), slug, channel, channel, msgID,
+		)
+	} else {
+		notification = fmt.Sprintf(
+			"[Channel update #%s %s from @%s]: %s — Before you say anything, call team_poll with my_slug \"%s\" and channel \"%s\" and read the latest channel plus task ownership. If someone already answered well or this is outside your domain, stay quiet. If you are directly responding, reply in-thread with team_broadcast channel \"%s\" reply_to_id \"%s\".",
+			channel, msgID, from, truncate(content, 150), slug, channel, channel, msgID,
+		)
+	}
 
 	paneTarget := fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx)
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
@@ -1738,6 +1808,38 @@ func shouldPrimeClaudePane(content string) bool {
 }
 
 func (l *Launcher) spawnVisibleAgents() ([]string, error) {
+	if l.isOneOnOne() {
+		slug := l.oneOnOneAgent()
+		firstCmd := l.claudeCommand(slug, l.buildPrompt(slug))
+		if err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
+			"-t", l.sessionName+":team",
+			"-p", "65",
+			"-c", l.cwd,
+			firstCmd,
+		).Run(); err != nil {
+			return nil, fmt.Errorf("spawn one-on-one agent: %w", err)
+		}
+		exec.Command("tmux", "-L", tmuxSocketName, "select-layout",
+			"-t", l.sessionName+":team",
+			"main-vertical",
+		).Run()
+		exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+			"-t", l.sessionName+":team.0",
+			"-T", "📢 direct",
+		).Run()
+		exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+			"-t", fmt.Sprintf("%s:team.1", l.sessionName),
+			"-T", fmt.Sprintf("🤖 %s (@%s)", l.getAgentName(slug), slug),
+		).Run()
+		exec.Command("tmux", "-L", tmuxSocketName, "select-window",
+			"-t", l.sessionName+":team",
+		).Run()
+		exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+			"-t", l.sessionName+":team.0",
+		).Run()
+		return []string{slug}, nil
+	}
+
 	// Layout: channel (left 35%) | agents in 2-column grid (right 65%)
 	//
 	// ┌─ channel ──┬─ CEO ───┬─ PM ────┐
@@ -1831,6 +1933,44 @@ func (l *Launcher) buildPrompt(slug string) string {
 	officeMembers := l.officeMembersSnapshot()
 
 	var sb strings.Builder
+
+	if l.isOneOnOne() {
+		sb.WriteString(fmt.Sprintf("You are %s in a direct one-on-one WUPHF session with the human.\n\n", agentCfg.Name))
+		sb.WriteString(fmt.Sprintf("Your expertise: %s\n\n", strings.Join(agentCfg.Expertise, ", ")))
+		sb.WriteString(fmt.Sprintf("Core personality: %s\n", agentCfg.Personality))
+		sb.WriteString(fmt.Sprintf("Voice and vibe: %s\n\n", teamVoiceForSlug(slug)))
+		sb.WriteString("== DIRECT SESSION ==\n")
+		sb.WriteString("This is not the shared office. There are no teammates, no channels, and no collaboration mechanics in this mode.\n")
+		sb.WriteString("You are only talking to the human.\n")
+		sb.WriteString("- team_poll: Read the recent 1:1 conversation before replying\n")
+		sb.WriteString("- team_broadcast: Send a normal direct chat reply into the 1:1 conversation\n")
+		sb.WriteString("- human_message: Send an emphasized report, recommendation, or action card directly to the human when you want it to stand out\n")
+		sb.WriteString("- human_interview: Ask a blocking decision question only when you truly cannot proceed responsibly without it\n\n")
+		if config.ResolveNoNex() {
+			sb.WriteString("Nex tools are disabled for this run. Base your work on the conversation and direct human answers only.\n\n")
+		} else {
+			sb.WriteString("Use the Nex context graph when it materially helps:\n")
+			sb.WriteString("- query_context: Look up prior decisions, people, projects, and history before guessing\n")
+			sb.WriteString("- add_context: Store durable conclusions only after you have actually landed them\n\n")
+		}
+		sb.WriteString("RULES:\n")
+		sb.WriteString("1. Do not talk as if a team exists. There are no other agents in this session.\n")
+		sb.WriteString("2. Do not create or suggest channels, teammates, bridges, shared tasks, or office structure.\n")
+		sb.WriteString("3. Default to direct, useful conversation with the human. Keep it crisp and human.\n")
+		sb.WriteString("4. Before you reply, poll the conversation so you respond to the latest state.\n")
+		sb.WriteString("5. Use team_broadcast for normal replies. Use human_message only when you are deliberately presenting completion, a recommendation, or a next action.\n")
+		sb.WriteString("6. Use human_interview only for truly blocking decisions.\n")
+		sb.WriteString("7. If Nex is enabled, do not claim something is stored unless add_context actually succeeded.\n")
+		sb.WriteString("8. No fake collaboration language like 'I'll ask the team' or 'let me route this'. It is just you and the human here.\n\n")
+		sb.WriteString("CONVERSATION STYLE:\n")
+		sb.WriteString("- Sound like a sharp human operator, not a formal assistant.\n")
+		sb.WriteString("- Be concise, direct, and a little alive.\n")
+		sb.WriteString("- Light humor is fine. Don't turn the 1:1 into a bit.\n")
+		sb.WriteString("- If the human asks for a plan, recommendation, explanation, or judgment you can reasonably give now, answer now.\n")
+		sb.WriteString("- Do not go silent and over-research by default. Only inspect files, run tools, or query Nex first when the answer genuinely depends on that context.\n")
+		sb.WriteString("- If you need a deeper pass, give the human the quick answer first, then continue with the deeper work.\n")
+		return sb.String()
+	}
 
 	if slug == lead {
 		sb.WriteString(fmt.Sprintf("You are the %s of the %s.\n\n", agentCfg.Name, l.PackName()))
@@ -2042,8 +2182,14 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 		brokerToken = l.broker.Token()
 	}
 
+	oneOnOneEnv := ""
+	if l.isOneOnOne() {
+		oneOnOneEnv = fmt.Sprintf("WUPHF_ONE_ON_ONE=1 WUPHF_ONE_ON_ONE_AGENT=%s ", l.oneOnOneAgent())
+	}
+
 	return fmt.Sprintf(
-		"WUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
+		"%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
+		oneOnOneEnv,
 		slug,
 		brokerToken,
 		config.ResolveNoNex(),
@@ -2176,6 +2322,45 @@ func (l *Launcher) officeMembersSnapshot() []officeMember {
 	return defaultOfficeMembers()
 }
 
+func loadRunningSessionMode() (string, string) {
+	token := strings.TrimSpace(os.Getenv("WUPHF_BROKER_TOKEN"))
+	if token == "" {
+		return SessionModeOffice, DefaultOneOnOneAgent
+	}
+
+	req, err := http.NewRequest(http.MethodGet, brokerBaseURL()+"/session-mode", nil)
+	if err != nil {
+		return SessionModeOffice, DefaultOneOnOneAgent
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := &http.Client{Timeout: time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return SessionModeOffice, DefaultOneOnOneAgent
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return SessionModeOffice, DefaultOneOnOneAgent
+	}
+
+	var result struct {
+		SessionMode   string `json:"session_mode"`
+		OneOnOneAgent string `json:"one_on_one_agent"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return SessionModeOffice, DefaultOneOnOneAgent
+	}
+	return NormalizeSessionMode(result.SessionMode), NormalizeOneOnOneAgent(result.OneOnOneAgent)
+}
+
+func brokerBaseURL() string {
+	if base := strings.TrimSpace(os.Getenv("WUPHF_BROKER_BASE_URL")); base != "" {
+		return strings.TrimRight(base, "/")
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", BrokerPort)
+}
+
 func (l *Launcher) officeMemberBySlug(slug string) officeMember {
 	for _, member := range l.officeMembersSnapshot() {
 		if member.Slug == slug {
@@ -2224,11 +2409,17 @@ func agentConfigFromMember(member officeMember) agent.AgentConfig {
 
 // PackName returns the display name of the pack.
 func (l *Launcher) PackName() string {
+	if l.isOneOnOne() {
+		return "1:1 with " + l.getAgentName(l.oneOnOneAgent())
+	}
 	return "WUPHF Office"
 }
 
 // AgentCount returns the number of agents in the pack.
 func (l *Launcher) AgentCount() int {
+	if l.isOneOnOne() {
+		return 1
+	}
 	return len(l.officeMembersSnapshot())
 }
 
