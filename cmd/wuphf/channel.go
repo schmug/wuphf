@@ -602,6 +602,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 	}
 	if m.isOneOnOne() {
 		m.sidebarCollapsed = true
+		m.threadsDefaultExpand = true
 		m.autocomplete = tui.NewAutocomplete(oneOnOneSlashCommands)
 	}
 	if config.ResolveNoNex() {
@@ -5125,7 +5126,7 @@ func runChannelView(threadsCollapsed bool, initialApp officeApp, skipSplash bool
 		}
 	}
 
-	p := tea.NewProgram(newChannelModelWithApp(threadsCollapsed, initialApp), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(newChannelModelWithApp(threadsCollapsed, initialApp), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		reportChannelCrash(fmt.Sprintf("channel view error: %v\n", err))
 	}
