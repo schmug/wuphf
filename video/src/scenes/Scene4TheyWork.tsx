@@ -1,16 +1,12 @@
 import { AbsoluteFill, useCurrentFrame, interpolate } from "remotion";
 import { colors, fonts, sec, starterAgents, slack } from "../theme";
 import { ChatMessage } from "../components/ChatMessage";
+import { PixelAvatar } from "../components/PixelAvatar";
 
 export const Scene4TheyWork: React.FC = () => {
   const frame = useCurrentFrame();
 
   const uiOpacity = interpolate(frame, [0, 12], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-
-  const tokensUsed = interpolate(frame, [sec(2), sec(9)], [0, 3.2], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -36,18 +32,18 @@ export const Scene4TheyWork: React.FC = () => {
             backgroundColor: "rgba(255,255,255,0.04)",
             display: "flex", alignItems: "center", justifyContent: "space-between",
           }}>
-            <div style={{ fontSize: 32, fontWeight: 700, color: "#FFF", fontStyle: "italic" }}>WUPHF</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: "#FFF", fontStyle: "italic" }}>WUPHF</div>
             <div style={{ width: 14, height: 14, borderRadius: "50%", backgroundColor: slack.presence }} />
           </div>
 
           {/* Channels */}
           <div style={{ padding: "20px 20px 8px" }}>
-            <div style={{ fontSize: 16, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.08em", color: slack.sidebarText, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.05em", color: slack.sidebarText, marginBottom: 4 }}>
               Channels
             </div>
             <div style={{
-              padding: "12px 16px", borderRadius: 10,
-              fontSize: 22, color: "#FFF",
+              padding: "6px 10px", borderRadius: 6,
+              fontSize: 14, color: "#FFF",
               backgroundColor: slack.sidebarActive, fontWeight: 600,
             }}>
               # general
@@ -56,7 +52,7 @@ export const Scene4TheyWork: React.FC = () => {
 
           {/* Team */}
           <div style={{ padding: "20px 20px 12px" }}>
-            <div style={{ fontSize: 16, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.08em", color: slack.sidebarText }}>
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.05em", color: slack.sidebarText }}>
               Team
             </div>
           </div>
@@ -67,41 +63,27 @@ export const Scene4TheyWork: React.FC = () => {
 
               return (
                 <div key={agent.slug} style={{
-                  display: "flex", alignItems: "center", gap: 12,
-                  padding: "10px 10px", borderRadius: 8, marginBottom: 4,
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "8px 10px", borderRadius: 6, marginBottom: 2,
                   color: slack.sidebarText,
                 }}>
-                  <div style={{ width: 12, height: 12, borderRadius: "50%", backgroundColor: statusColors[i], opacity: dotPulse, flexShrink: 0 }} />
-                  <div style={{
-                    width: 40, height: 40, borderRadius: 8,
-                    backgroundColor: agent.color,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 22, flexShrink: 0,
-                  }}>
-                    {agent.emoji}
-                  </div>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: statusColors[i], opacity: dotPulse, flexShrink: 0 }} />
+                  <PixelAvatar slug={agent.slug} color={agent.color} size={32} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 20, fontWeight: 600, color: "rgba(255,255,255,0.9)" }}>{agent.name}</div>
-                    <div style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", fontFamily: fonts.mono, marginTop: 2 }}>{tasks[i]}</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "rgba(255,255,255,0.9)" }}>{agent.name}</div>
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontFamily: fonts.mono, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{tasks[i]}</div>
                   </div>
                 </div>
               );
             })}
           </div>
 
-          {/* Token tracker */}
-          {frame > sec(2) && (
-            <div style={{ marginTop: "auto", padding: "20px 24px", borderTop: `1px solid ${slack.sidebarBorder}` }}>
-              <div style={{ fontSize: 14, color: slack.sidebarText, textTransform: "uppercase" as const, letterSpacing: "0.08em", marginBottom: 4 }}>
-                Tokens this turn
-              </div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-                <div style={{ fontSize: 36, fontWeight: 800, color: slack.presence, fontFamily: fonts.mono }}>
-                  {tokensUsed.toFixed(1)}K
-                </div>
-              </div>
+          {/* Usage section (collapsed, matches real sidebar bottom) */}
+          <div style={{ marginTop: "auto", padding: "8px 16px", borderTop: `1px solid ${slack.sidebarBorder}` }}>
+            <div style={{ fontSize: 10, color: slack.sidebarText, textTransform: "uppercase" as const, letterSpacing: "0.05em", opacity: 0.7 }}>
+              Usage
             </div>
-          )}
+          </div>
         </div>
 
         {/* ── MAIN CHANNEL ── */}
@@ -156,14 +138,35 @@ export const Scene4TheyWork: React.FC = () => {
           </div>
 
           {/* Composer */}
-          <div style={{ padding: "16px 32px 24px" }}>
+          <div style={{ padding: "12px 32px 16px" }}>
             <div style={{
               backgroundColor: slack.bgWarm, border: `1px solid ${slack.border}`,
-              borderRadius: 12, padding: "18px 22px",
-              fontSize: 20, color: slack.textTertiary, fontFamily: fonts.sans,
+              borderRadius: 8, padding: "14px 18px",
+              fontSize: 18, color: slack.textTertiary, fontFamily: fonts.sans,
+              display: "flex", alignItems: "center", justifyContent: "space-between",
             }}>
-              Message #general...
+              <span>Message #general — type / for commands, @ to mention</span>
+              {/* Send arrow */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={slack.textTertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m22 2-7 20-4-9-9-4z"/><path d="m22 2-10 10"/>
+              </svg>
             </div>
+          </div>
+
+          {/* Status bar — matches real platform exactly */}
+          <div style={{
+            padding: "4px 16px", borderTop: `1px solid ${slack.borderLight}`,
+            display: "flex", alignItems: "center", gap: 16,
+            fontFamily: fonts.mono, fontSize: 12, color: slack.textTertiary,
+            backgroundColor: slack.bgWarm,
+          }}>
+            <span style={{ color: slack.text }}># general office</span>
+            <span style={{ marginLeft: "auto" }}>codex</span>
+            <span>3 agents</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: slack.greenPresence }} />
+              connected
+            </span>
           </div>
         </div>
       </div>
