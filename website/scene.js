@@ -58,6 +58,14 @@
     return { x: p.x + TW / 2, y: p.y + TH / 2 };
   }
 
+  // ── State ──────────────────────────────────────────────────────
+  let flashOn   = true;
+  let animF     = 0;
+  let drawerHit = null;
+
+  setInterval(() => { flashOn = !flashOn; }, 500);
+  setInterval(() => { animF = (animF + 1) % 4; }, 280);
+
   // ── Floor tile ─────────────────────────────────────────────────
   function drawFloorTile(gx, gy, color) {
     const p = iso(gx, gy);
@@ -193,16 +201,91 @@
     ctx.fillText('ROOM', cp.x - 20, OY + 17);
   }
 
+  // ── Furniture ──────────────────────────────────────────────────
+  // Returns the hit-testable drawer rect: { drawerX, drawerY }
+  function drawDesk(gx, gy, w, flash) {
+    const DH = 22;
+    drawIsoBox(gx, gy, w, 1, DH, C.desk, C.deskDark, C.deskSide);
+
+    // Monitor
+    const p  = iso(gx, gy);
+    const mx = p.x + TW * w / 2 + 6;
+    const my = p.y - DH - 22;
+    ctx.fillStyle = '#1A2030'; ctx.fillRect(mx, my, 28, 18);
+    ctx.fillStyle = '#1A3858'; ctx.fillRect(mx + 2, my + 2, 24, 14);
+    ctx.fillStyle = C.blue;
+    for (let i = 0; i < 3; i++) ctx.fillRect(mx + 4, my + 4 + i * 4, 8 + i * 4, 2);
+    ctx.fillStyle = '#1A1820';
+    ctx.fillRect(mx + 10, my + 18, 8, 5);
+    ctx.fillRect(mx + 6,  my + 22, 16, 3);
+
+    // Drawer (flashes amber when flash=true)
+    const dp = iso(gx + w - 1, gy);
+    const dx = dp.x + 6;
+    const dy = dp.y - DH + 6;
+    ctx.fillStyle = (flash && flashOn) ? C.yellow : C.deskDark;
+    if (flash && flashOn) { ctx.shadowColor = C.yellow; ctx.shadowBlur = 8; }
+    ctx.fillRect(dx, dy, 20, 12);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = (flash && flashOn) ? C.yellow : C.deskSide;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(dx, dy, 20, 12);
+    ctx.fillStyle = C.yellow;
+    ctx.fillRect(dx + 7, dy + 4, 6, 4);
+
+    // Paper on desk
+    const pp = iso(gx, gy);
+    ctx.fillStyle = C.surfaceHi; ctx.fillRect(pp.x + 16, pp.y - DH - 2, 16, 12);
+    ctx.fillStyle = C.border;
+    for (let i = 0; i < 3; i++) ctx.fillRect(pp.x + 18, pp.y - DH + 1 + i * 3, 10, 1);
+
+    return { drawerX: dx, drawerY: dy };
+  }
+
+  function drawPlant(gx, gy) {
+    const c = isoCenter(gx, gy);
+    ctx.fillStyle = '#5A3A18'; ctx.fillRect(c.x - 5, c.y - 14, 10, 10);
+    ctx.fillStyle = C.plant;   ctx.fillRect(c.x - 10, c.y - 28, 20, 18);
+    ctx.fillStyle = '#2A4818'; ctx.fillRect(c.x - 7,  c.y - 32, 14, 8);
+    ctx.fillStyle = C.plant;   ctx.fillRect(c.x - 4,  c.y - 36, 8, 10);
+  }
+
+  function drawSnackJar(gx, gy) {
+    const c = isoCenter(gx, gy);
+    ctx.fillStyle = '#3A5878'; ctx.fillRect(c.x - 6, c.y - 18, 12, 14);
+    ctx.fillStyle = C.surface; ctx.fillRect(c.x - 5, c.y - 17, 10, 12);
+    ctx.fillStyle = C.yellow;  ctx.fillRect(c.x - 3, c.y - 12, 6, 6);
+    ctx.fillStyle = C.deskDark; ctx.fillRect(c.x - 5, c.y - 18, 12, 4);
+    ctx.fillStyle = C.text;
+    ctx.font = '4px "Press Start 2P"'; ctx.textAlign = 'center';
+    ctx.fillText('NO',    c.x, c.y - 10);
+    ctx.fillText('WASTE', c.x, c.y - 6);
+  }
+
   // ── Main draw ──────────────────────────────────────────────────
   function draw() {
     ctx.clearRect(0, 0, W, H);
     drawWall();
 
+    // Floor tiles
     for (let gy = 0; gy < ROWS; gy++) {
       for (let gx = 0; gx < COLS; gx++) {
         drawFloorTile(gx, gy, (gx + gy) % 2 === 0 ? C.carpet : C.carpetAlt);
       }
     }
+
+    // Props
+    drawPlant(8, 0);
+    drawPlant(8, 2);
+    drawSnackJar(5, 4);
+
+    // Desks (back-to-front: lower gx+gy first)
+    drawerHit = drawDesk(2, 0, 2, true);  // reception desk — flashing drawer
+    drawDesk(0, 3, 1, false);             // Dwight's desk
+    drawDesk(2, 3, 1, false);             // Jim's desk
+    drawDesk(5, 1, 1, false);             // CEO Agent desk (back right)
+    drawDesk(2, 4, 1, false);             // Engineer Agent desk
+    drawDesk(4, 3, 1, false);             // CMO Agent desk
   }
 
   function loop() { draw(); requestAnimationFrame(loop); }
