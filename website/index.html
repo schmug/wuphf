@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WUPHF — Your AI team, visible and working.</title>
+  <meta name="description" content="One command. One shared office. CEO, PM, engineers, designer — all visible, arguing, claiming tasks, and shipping work.">
+  <!-- Open Graph -->
+  <meta property="og:title" content="WUPHF">
+  <meta property="og:description" content="A terminal office where your AI team works in the open.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav class="site-nav">
+    <span class="nav-logo">WUPHF</span>
+    <div class="nav-links">
+      <a href="https://github.com/nex-crm/wuphf" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://discord.gg/gjSySC3PzV" target="_blank" rel="noopener">Discord</a>
+      <a href="https://github.com/nex-crm/wuphf#get-started" target="_blank" rel="noopener">Docs</a>
+    </div>
+  </nav>
+
+  <!-- OFFICE SCENE -->
+  <div class="scene-wrap" id="sceneWrap">
+    <canvas id="officeCanvas"></canvas>
+  </div>
+  <div class="hint-bar">
+    <span class="hint-arrow">↑</span> click characters for quotes &nbsp;·&nbsp;
+    click the flashing drawer &nbsp;·&nbsp; explore to find hidden messaging
+  </div>
+
+  <!-- INSTALL SECTION -->
+  <section class="install-section">
+    <div class="install-inner">
+      <div class="install-label">one command</div>
+      <div class="install-cmd">
+        <span class="install-prompt">$</span>
+        <span class="install-code">go build -o wuphf ./cmd/wuphf &amp;&amp; ./wuphf</span>
+      </div>
+      <div class="install-note">
+        Requires <a href="https://go.dev/dl/" target="_blank" rel="noopener">Go</a>
+        and <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener">Claude Code</a>.
+        Browser opens automatically.
+      </div>
+      <div class="install-ctas">
+        <a href="https://github.com/nex-crm/wuphf" class="btn-pixel" target="_blank" rel="noopener">View on GitHub →</a>
+        <a href="https://discord.gg/gjSySC3PzV" class="btn-pixel btn-secondary" target="_blank" rel="noopener">Join Discord →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span class="footer-logo">WUPHF</span>
+      <div class="footer-links">
+        <a href="https://github.com/nex-crm/wuphf" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/nex-crm/wuphf/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+        <a href="https://discord.gg/gjSySC3PzV" target="_blank" rel="noopener">Discord</a>
+      </div>
+      <div class="footer-note">
+        Unlike the original WUPHF.com, this one works.
+      </div>
+    </div>
+  </footer>
+
+  <script src="scene.js"></script>
+</body>
+</html>
