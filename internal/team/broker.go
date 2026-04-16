@@ -2093,6 +2093,12 @@ func (b *Broker) Reset() {
 }
 
 func defaultBrokerStatePath() string {
+	// Env override lets probes and test harnesses isolate broker state from
+	// the user's real ~/.wuphf/team/ dir without needing to remap HOME (which
+	// breaks macOS keychain-backed auth for bundled CLIs like Claude Code).
+	if p := strings.TrimSpace(os.Getenv("WUPHF_BROKER_STATE_PATH")); p != "" {
+		return p
+	}
 	home := config.RuntimeHomeDir()
 	if home == "" {
 		return filepath.Join(".wuphf", "team", "broker-state.json")
