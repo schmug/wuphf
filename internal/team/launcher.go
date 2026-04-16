@@ -3312,9 +3312,36 @@ func teamVoiceForSlug(slug string) string {
 }
 
 func (l *Launcher) officeMembersSnapshot() []officeMember {
+	mergePackMembers := func(members []officeMember) []officeMember {
+		if l == nil || l.pack == nil || len(l.pack.Agents) == 0 {
+			return members
+		}
+		bySlug := make(map[string]struct{}, len(members))
+		for _, member := range members {
+			bySlug[member.Slug] = struct{}{}
+		}
+		for _, cfg := range l.pack.Agents {
+			if _, ok := bySlug[cfg.Slug]; ok {
+				continue
+			}
+			member := officeMember{
+				Slug:           cfg.Slug,
+				Name:           cfg.Name,
+				Role:           cfg.Name,
+				Expertise:      append([]string(nil), cfg.Expertise...),
+				Personality:    cfg.Personality,
+				PermissionMode: cfg.PermissionMode,
+				AllowedTools:   append([]string(nil), cfg.AllowedTools...),
+				BuiltIn:        cfg.Slug == l.pack.LeadSlug || cfg.Slug == "ceo",
+			}
+			applyOfficeMemberDefaults(&member)
+			members = append(members, member)
+		}
+		return members
+	}
 	if l.broker != nil {
 		if members := l.broker.OfficeMembers(); len(members) > 0 {
-			return members
+			return mergePackMembers(members)
 		}
 	}
 	path := brokerStatePath()
@@ -3344,7 +3371,7 @@ func (l *Launcher) officeMembersSnapshot() []officeMember {
 			applyOfficeMemberDefaults(&member)
 			members = append(members, member)
 		}
-		return members
+		return mergePackMembers(members)
 	}
 	if manifest, err := company.LoadRuntimeManifest(resolveRepoRoot(l.cwd)); err == nil && len(manifest.Members) > 0 {
 		members := make([]officeMember, 0, len(manifest.Members))
@@ -3362,9 +3389,9 @@ func (l *Launcher) officeMembersSnapshot() []officeMember {
 			applyOfficeMemberDefaults(&member)
 			members = append(members, member)
 		}
-		return members
+		return mergePackMembers(members)
 	}
-	return defaultOfficeMembers()
+	return mergePackMembers(defaultOfficeMembers())
 }
 
 // resetManifestToPack overwrites company.json with the members defined in the

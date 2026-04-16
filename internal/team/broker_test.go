@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -30,6 +31,18 @@ func TestMain(m *testing.M) {
 		defer os.RemoveAll(dir)
 	}
 	os.Exit(m.Run())
+}
+
+func initUsableGitWorktree(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+	cmd := exec.Command("git", "init")
+	cmd.Dir = path
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init %s: %v: %s", path, err, strings.TrimSpace(string(out)))
+	}
 }
 
 func TestFormatChannelViewIncludesThreadReference(t *testing.T) {
@@ -2529,8 +2542,11 @@ func TestBrokerApproveRetainsLocalWorktree(t *testing.T) {
 	oldPrepare := prepareTaskWorktree
 	oldCleanup := cleanupTaskWorktree
 	cleanupCalls := 0
+	worktreeRoot := t.TempDir()
 	prepareTaskWorktree = func(taskID string) (string, string, error) {
-		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
+		path := filepath.Join(worktreeRoot, "wuphf-task-"+taskID)
+		initUsableGitWorktree(t, path)
+		return path, "wuphf-" + taskID, nil
 	}
 	cleanupTaskWorktree = func(path, branch string) error {
 		cleanupCalls++
@@ -3167,12 +3183,15 @@ func TestBrokerCreateTaskReusesCompletedDependencyWorktree(t *testing.T) {
 	oldPrepare := prepareTaskWorktree
 	oldCleanup := cleanupTaskWorktree
 	var prepareCalls []string
+	worktreeRoot := t.TempDir()
 	prepareTaskWorktree = func(taskID string) (string, string, error) {
 		prepareCalls = append(prepareCalls, taskID)
 		if len(prepareCalls) > 1 {
 			return "", "", fmt.Errorf("unexpected prepareTaskWorktree call for %s", taskID)
 		}
-		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
+		path := filepath.Join(worktreeRoot, "wuphf-task-"+taskID)
+		initUsableGitWorktree(t, path)
+		return path, "wuphf-" + taskID, nil
 	}
 	cleanupTaskWorktree = func(path, branch string) error { return nil }
 	defer func() {

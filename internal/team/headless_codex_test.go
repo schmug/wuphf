@@ -1698,8 +1698,8 @@ func TestHeadlessTurnCompletedDurablyRejectsExternalCompletionWithoutWorkflowEvi
 	b := NewBroker()
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:     "general",
-		Title:       "Create one new Notion proof artifact for the consulting proof",
-		Details:     "Use the connected Notion workspace and leave evidence in channel.",
+		Title:       "Create one new Notion client workspace page for the consulting engagement",
+		Details:     "Use the connected Notion workspace and leave the new client-facing page link in channel.",
 		Owner:       "builder",
 		CreatedBy:   "ceo",
 		TaskType:    "follow_up",
@@ -1737,8 +1737,8 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithWorkflowEviden
 	b := NewBroker()
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:     "general",
-		Title:       "Create one new Notion proof artifact for the consulting proof",
-		Details:     "Use the connected Notion workspace and leave evidence in channel.",
+		Title:       "Create one new Notion client workspace page for the consulting engagement",
+		Details:     "Use the connected Notion workspace and leave the new client-facing page link in channel.",
 		Owner:       "builder",
 		CreatedBy:   "ceo",
 		TaskType:    "follow_up",
@@ -1754,7 +1754,7 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithWorkflowEviden
 			break
 		}
 	}
-	if err := b.RecordAction("external_workflow_executed", "notion", "general", "builder", "Created proof page in Notion", "workflow-notion-proof", nil, ""); err != nil {
+	if err := b.RecordAction("external_workflow_executed", "notion", "general", "builder", "Created client workspace page in Notion", "workflow-notion-client-page", nil, ""); err != nil {
 		t.Fatalf("record action: %v", err)
 	}
 
@@ -1776,8 +1776,8 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithActionEvidence
 	b := NewBroker()
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:     "general",
-		Title:       "Create one new Notion proof artifact for the consulting proof",
-		Details:     "Use the connected Notion workspace and leave evidence in channel.",
+		Title:       "Verify the new Notion client workspace page for the consulting engagement",
+		Details:     "Use the connected Notion workspace and confirm the client-facing page is live.",
 		Owner:       "reviewer",
 		CreatedBy:   "ceo",
 		TaskType:    "follow_up",
@@ -1793,7 +1793,7 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithActionEvidence
 			break
 		}
 	}
-	if err := b.RecordAction("external_action_executed", "one", "general", "reviewer", "Verified proof page in Notion", "notion-page-proof", nil, ""); err != nil {
+	if err := b.RecordAction("external_action_executed", "one", "general", "reviewer", "Verified client workspace page in Notion", "notion-client-page", nil, ""); err != nil {
 		t.Fatalf("record action: %v", err)
 	}
 
