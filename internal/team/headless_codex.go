@@ -292,40 +292,49 @@ func (l *Launcher) headlessLeadTurnNeedsImmediateWakeLocked(slug, prompt string)
 
 func (l *Launcher) runHeadlessCodexQueue(slug string) {
 	for {
-		turn, turnCtx, startedAt, timeout, ok := l.beginHeadlessCodexTurn(slug)
-		if !ok {
-			l.updateHeadlessProgress(slug, "idle", "idle", "waiting for work", headlessProgressMetrics{})
+		func() {
+			defer recoverPanicTo("runHeadlessCodexQueue", fmt.Sprintf("slug=%s", slug))
+			turn, turnCtx, startedAt, timeout, ok := l.beginHeadlessCodexTurn(slug)
+			if !ok {
+				l.updateHeadlessProgress(slug, "idle", "idle", "waiting for work", headlessProgressMetrics{})
+				return
+			}
+			appendHeadlessCodexLatency(slug, fmt.Sprintf("stage=started queue_wait_ms=%d", time.Since(turn.EnqueuedAt).Milliseconds()))
+			l.updateHeadlessProgress(slug, "active", "queued", "queued work packet received", headlessProgressMetrics{})
+
+			err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt, turn.Channel)
+			ctxErr := turnCtx.Err()
+			if err == nil {
+				l.headlessMu.Lock()
+				active := l.headlessActive[slug]
+				l.headlessMu.Unlock()
+				if ok, reason := l.headlessTurnCompletedDurably(slug, active); !ok {
+					appendHeadlessCodexLog(slug, "durability-error: "+reason)
+					err = errors.New(reason)
+				}
+			}
+			switch {
+			case err == nil:
+			case errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
+				appendHeadlessCodexLog(slug, fmt.Sprintf("error: headless codex turn timed out after %s", timeout))
+				l.updateHeadlessProgress(slug, "error", "error", fmt.Sprintf("turn timed out after %s", timeout), headlessProgressMetrics{})
+				l.recoverTimedOutHeadlessTurn(slug, turn, startedAt, timeout)
+			case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
+				appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
+				l.updateHeadlessProgress(slug, "active", "queued", "restarting on newer queued work", headlessProgressMetrics{})
+			default:
+				appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
+				l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
+				l.recoverFailedHeadlessTurn(slug, turn, startedAt, err.Error())
+			}
+			l.finishHeadlessTurn(slug)
+		}()
+		l.headlessMu.Lock()
+		_, stillRunning := l.headlessWorkers[slug]
+		l.headlessMu.Unlock()
+		if !stillRunning {
 			return
 		}
-		appendHeadlessCodexLatency(slug, fmt.Sprintf("stage=started queue_wait_ms=%d", time.Since(turn.EnqueuedAt).Milliseconds()))
-		l.updateHeadlessProgress(slug, "active", "queued", "queued work packet received", headlessProgressMetrics{})
-
-		err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt, turn.Channel)
-		ctxErr := turnCtx.Err()
-		if err == nil {
-			l.headlessMu.Lock()
-			active := l.headlessActive[slug]
-			l.headlessMu.Unlock()
-			if ok, reason := l.headlessTurnCompletedDurably(slug, active); !ok {
-				appendHeadlessCodexLog(slug, "durability-error: "+reason)
-				err = errors.New(reason)
-			}
-		}
-		switch {
-		case err == nil:
-		case errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
-			appendHeadlessCodexLog(slug, fmt.Sprintf("error: headless codex turn timed out after %s", timeout))
-			l.updateHeadlessProgress(slug, "error", "error", fmt.Sprintf("turn timed out after %s", timeout), headlessProgressMetrics{})
-			l.recoverTimedOutHeadlessTurn(slug, turn, startedAt, timeout)
-		case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
-			appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
-			l.updateHeadlessProgress(slug, "active", "queued", "restarting on newer queued work", headlessProgressMetrics{})
-		default:
-			appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
-			l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
-			l.recoverFailedHeadlessTurn(slug, turn, startedAt, err.Error())
-		}
-		l.finishHeadlessTurn(slug)
 	}
 }
 
