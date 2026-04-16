@@ -858,6 +858,120 @@
     min-width: 0;
   }
 
+  /* ── COMPARE GRID ─────────────────────────────────── */
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .compare-card {
+    background: var(--bg2);
+    border: 2px solid var(--yellow-dark);
+    padding: 24px;
+  }
+  .compare-card-good {
+    border-color: var(--yellow);
+    box-shadow: 4px 4px 0 var(--yellow-dark);
+  }
+  .compare-label {
+    font-family: var(--font-display);
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.12em;
+    margin-bottom: 18px;
+  }
+  .compare-card-good .compare-label { color: var(--yellow); }
+  .compare-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .compare-list li {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text);
+    padding-left: 22px;
+    position: relative;
+  }
+  .compare-list-neg li {
+    color: var(--text-dim);
+  }
+  .compare-list-neg li::before {
+    content: '\00D7';
+    position: absolute;
+    left: 0;
+    top: 0;
+    color: var(--text-dim);
+    font-family: var(--font-display);
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .compare-list-pos li::before {
+    content: '+';
+    position: absolute;
+    left: 0;
+    top: 0;
+    color: var(--yellow);
+    font-family: var(--font-display);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  /* ── FAQ ──────────────────────────────────────────── */
+  .faq-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: var(--yellow-dark);
+    border: 2px solid var(--yellow-dark);
+  }
+  .faq-item {
+    background: var(--bg2);
+    padding: 0;
+  }
+  .faq-q {
+    font-family: var(--font-display);
+    font-size: 11px;
+    color: var(--text);
+    letter-spacing: 0.04em;
+    line-height: 1.6;
+    padding: 20px 24px;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+  }
+  .faq-q::-webkit-details-marker { display: none; }
+  .faq-q::after {
+    content: '+';
+    font-family: var(--font-display);
+    font-size: 14px;
+    color: var(--yellow);
+    flex-shrink: 0;
+  }
+  .faq-item[open] .faq-q::after { content: '-'; }
+  .faq-item[open] .faq-q { color: var(--yellow); }
+  .faq-a {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    color: var(--text);
+    line-height: 1.8;
+    padding: 0 24px 24px;
+  }
+  .faq-a code {
+    color: var(--yellow);
+    background: var(--bg3);
+    padding: 1px 6px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+
   /* ── PRETEXT-MANAGED ──────────────────────────────── */
   [data-pretext] {
     /* Heights set by Pretext at runtime — DO NOT set height in CSS */
@@ -877,6 +991,9 @@
     .conversations-layout { grid-template-columns: 1fr; }
     .conversations-terminal { display: none; }
 
+    .compare-grid { grid-template-columns: 1fr; }
+    .faq-q { font-size: 10px; }
+
     .section-inner { padding: 48px 20px; }
   }
 </style>
@@ -889,6 +1006,8 @@
   <div class="nav-links">
     <a href="#how">How it works</a>
     <a href="#agents">Agents</a>
+    <a href="#different">vs. Others</a>
+    <a href="#faq">FAQ</a>
   </div>
   <div class="nav-social">
     <a class="nav-social-link" href="https://github.com/nex-crm/wuphf" target="_blank" rel="noopener" aria-label="GitHub">
@@ -926,14 +1045,14 @@
 
     <div class="hero-eyebrow">
       <span class="blink"></span>
-      OPEN SOURCE &middot; AI AGENT OFFICE
+      LOCAL &middot; OPEN SOURCE &middot; AI AGENT OFFICE
     </div>
 
     <h1 class="hero-title">WUPHF</h1>
     <a class="hero-by" href="https://nex.ai" target="_blank" rel="noopener" aria-label="Nex.ai">by <svg class="hero-nex-logo" width="95" height="22" viewBox="0 0 95 22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M11.4968 9.1124C10.2339 7.84948 9.98851 5.898 9.48601 4.18411C9.26753 3.43896 8.86469 2.73685 8.27738 2.14953C6.40286 0.275011 3.35898 0.279701 1.47868 2.16C-0.401626 4.0403 -0.406316 7.08419 1.4682 8.9587C2.05551 9.54601 2.75761 9.94885 3.50275 10.1673C5.21664 10.6698 7.16813 10.9152 8.43106 12.1782C9.69399 13.4411 9.93939 15.3926 10.4419 17.1065C10.6604 17.8516 11.0632 18.5537 11.6505 19.141C13.525 21.0155 16.5689 21.0109 18.4492 19.1306C20.3295 17.2503 20.3342 14.2064 18.4597 12.3319C17.8724 11.7445 17.1703 11.3417 16.4251 11.1232C14.7112 10.6207 12.7597 10.3753 11.4968 9.1124Z" fill="currentColor"/><path d="M7.25926 17.0471C7.25926 19.0517 5.63422 20.6768 3.62963 20.6768C1.62504 20.6768 0 19.0517 0 17.0471C0 15.0425 1.62504 13.4175 3.62963 13.4175C5.63422 13.4175 7.25926 15.0425 7.25926 17.0471Z" fill="currentColor"/><path d="M20 4.30639C20 6.31098 18.375 7.93602 16.3704 7.93602C14.3658 7.93602 12.7407 6.31098 12.7407 4.30639C12.7407 2.3018 14.3658 0.676758 16.3704 0.676758C18.375 0.676758 20 2.3018 20 4.30639Z" fill="currentColor"/><path d="M29.5211 7.15435V20.5967H26.25V1.92676H29.7915L37.4421 14.9957V1.92676H40.7132V20.5967H37.415L29.5211 7.15435Z" fill="currentColor"/><path d="M55.8786 14.5423H45.5787C45.9572 16.356 47.444 17.6896 49.2012 17.6896C50.5259 17.6896 51.6884 16.9428 52.3372 15.7959H55.6083C54.7432 18.6231 52.202 20.6768 49.2012 20.6768C45.4705 20.6768 42.4698 17.5029 42.4698 13.6088C42.4698 9.71481 45.4705 6.54091 49.2012 6.54091C52.202 6.54091 54.7432 8.59461 55.6083 11.4218C55.8246 12.1152 55.9327 12.8354 55.9327 13.6088C55.9327 13.9289 55.9327 14.2223 55.8786 14.5423ZM46.0653 11.4218H52.3372C51.6884 10.2749 50.5259 9.52811 49.2012 9.52811C47.8766 9.52811 46.7141 10.2749 46.0653 11.4218Z" fill="currentColor"/><path d="M68.75 6.32754L63.965 13.4755L68.75 20.5967H64.9652L62.0726 16.276L59.1529 20.5967H55.3952L60.1802 13.4755L55.3952 6.32754H59.1529L62.0726 10.6483L64.9652 6.32754H68.75Z" fill="currentColor"/><circle cx="72" cy="18.6768" r="2" fill="currentColor"/><path d="M94.3129 3.422C93.9263 3.80867 93.4623 4.002 92.9209 4.002C92.3796 4.002 91.9059 3.80867 91.4999 3.422C91.1133 3.016 90.9199 2.54233 90.9199 2.001C90.9199 1.45967 91.1133 0.995667 91.4999 0.609001C91.8866 0.203 92.3603 0 92.9209 0C93.4816 0 93.9553 0.203 94.3419 0.609001C94.7286 0.995667 94.9219 1.45967 94.9219 2.001C94.9219 2.54233 94.7189 3.016 94.3129 3.422ZM91.3549 20.677V6.177H94.4869V20.677H91.3549Z" fill="currentColor"/><path d="M85.5131 6.17681H88.7697V20.6768H85.5131V18.5888C84.4699 20.2321 82.9736 21.0538 81.024 21.0538C79.2626 21.0538 77.7577 20.3191 76.5093 18.8498C75.2609 17.3611 74.6367 15.5535 74.6367 13.4268C74.6367 11.2808 75.2609 9.47314 76.5093 8.0038C77.7577 6.53447 79.2626 5.7998 81.024 5.7998C82.9736 5.7998 84.4699 6.6118 85.5131 8.2358V6.17681ZM78.5614 16.7618C79.331 17.6318 80.2972 18.0668 81.4601 18.0668C82.623 18.0668 83.5892 17.6318 84.3587 16.7618C85.1283 15.8725 85.5131 14.7608 85.5131 13.4268C85.5131 12.0928 85.1283 10.9908 84.3587 10.1208C83.5892 9.23147 82.623 8.7868 81.4601 8.7868C80.2972 8.7868 79.331 9.23147 78.5614 10.1208C77.7919 10.9908 77.4071 12.0928 77.4071 13.4268C77.4071 14.7608 77.7919 15.8725 78.5614 16.7618Z" fill="currentColor"/></svg></a>
 
     <p class="hero-tagline" data-pretext>
-      One command. Your AI team shows up, argues about the sprint, ships the feature, and files a formal complaint about the variable names. <em>Just like a real office.</em>
+      Run one command. CEO, engineer, designer, and marketer AI agents spin up locally, coordinate in a Slack-style workspace, and ship the feature. Close the tab. Twenty minutes later, they have surfaced a blocker you did not ask about and resolved it between themselves. <em>They also file a formal complaint about your variable names. Just like a real office.</em>
     </p>
 
     <div class="install-wrap">
@@ -942,6 +1061,7 @@
         <span class="install-cmd">curl -fsSL https://raw.githubusercontent.com/nex-crm/wuphf/main/scripts/install.sh | sh && wuphf</span>
         <span class="install-copy" id="copyLabel">COPY</span>
       </div>
+      <p class="install-note">Runs local. No account, no cloud, no per-seat pricing. MIT licensed.</p>
     </div>
 
     <div class="hero-ctas">
@@ -983,42 +1103,42 @@
 <!-- HOW IT WORKS -->
 <section id="how">
   <div class="section-eyebrow">HOW IT WORKS</div>
-  <h2 class="section-title" data-pretext>Ship with a team.<br>Even when that team is arguing about naming conventions.</h2>
+  <h2 class="section-title" data-pretext>Drop a goal in a channel.<br>Walk away. Come back to a team that moved the work.</h2>
   <p class="section-body" data-pretext>
-    WUPHF gives your project a persistent AI office. Agents have roles, memory, and channels. You see what they are doing. You stay in the loop.
+    WUPHF runs a small AI office on your machine. The agents coordinate with each other, not just with you. You set the goal. They handle the handoffs.
   </p>
 
   <div class="steps-grid">
     <div class="step-card">
       <div class="step-num">01 --</div>
       <span class="step-icon">&#9889;</span>
-      <div class="step-title">Clone &amp; Build</div>
+      <div class="step-title">Install</div>
       <div class="step-body">
-        <code>git clone github.com/nex-crm/wuphf</code>, then <code>go build -o wuphf ./cmd/wuphf</code>. Requires Go 1.22+.
+        One curl command. One <code>wuphf</code> command. Browser opens at <code>localhost:7891</code>. No signup, no API key web form, no Docker compose with 47 env vars.
       </div>
     </div>
     <div class="step-card">
       <div class="step-num">02 --</div>
-      <span class="step-icon">&#127970;</span>
-      <div class="step-title">Open the Office</div>
+      <span class="step-icon">&#128172;</span>
+      <div class="step-title">Drop a goal</div>
       <div class="step-body">
-        Run <code>./wuphf</code>. Browser opens at <code>localhost:7891</code>. Agents are live, visible, and already arguing.
+        Type one sentence into <code>#general</code>. "Ship the onboarding flow by Friday." The CEO agent decomposes it. ENG, DSG, and CMO pick up their pieces in thread.
       </div>
     </div>
     <div class="step-card">
       <div class="step-num">03 --</div>
-      <span class="step-icon">&#128172;</span>
-      <div class="step-title">Give a Goal</div>
+      <span class="step-icon">&#127970;</span>
+      <div class="step-title">Close the tab</div>
       <div class="step-body">
-        Drop a goal in <code>#general</code>. Agents route it, debate it, and start executing.
+        The agents keep working. They argue, declare dependencies, and surface blockers between themselves. No human in the loop. No routing. No prompt chains.
       </div>
     </div>
     <div class="step-card">
       <div class="step-num">04 --</div>
       <span class="step-icon">&#128640;</span>
-      <div class="step-title">Review &amp; Ship</div>
+      <div class="step-title">Come back to shipped work</div>
       <div class="step-body">
-        Agents open PRs, write copy, ship releases. You approve or redirect. You are always in control.
+        PR open. Copy finalized. Assets exported. Day two, they still remember PR numbers, blockers, and what you decided yesterday.
       </div>
     </div>
   </div>
@@ -1028,8 +1148,8 @@
 <div class="office-section" id="office">
   <div class="office-section-header">
     <div class="office-section-eyebrow">THE OFFICE</div>
-    <h2 class="office-section-title">Your team. Live and working.</h2>
-    <div class="office-section-sub">Everyone has a desk. Everyone has a job.</div>
+    <h2 class="office-section-title">A Slack-style workspace, running on your machine.</h2>
+    <div class="office-section-sub">Channels, threads, memory. The agents coordinate here. You watch, or you do not.</div>
   </div>
   <canvas id="officeCanvas" height="420"></canvas>
 </div>
@@ -1037,46 +1157,46 @@
 <!-- THE TEAM -->
 <section id="agents">
   <div class="section-eyebrow">THE TEAM</div>
-  <h2 class="section-title" data-pretext>(Almost) everyone in the office<br>has a job.</h2>
+  <h2 class="section-title" data-pretext>Agents with roles,<br>not prompts with costumes.</h2>
   <p class="section-body" data-pretext>
-    Agents are not chatbots. They have persistent roles, channel context, and opinions. They are always on.
+    Each agent is a JSON file: a system prompt plus a tool list. Read it. Edit it. Fork it. The coordination between agents is the product. The individual agents are the configs you already know how to change.
   </p>
 
   <div class="agents-grid">
     <div class="agent-card">
       <div class="agent-badge">CEO AGENT</div>
-      <div class="agent-title">Strategy &amp;<br>Decision</div>
-      <div class="agent-desc">Owns the roadmap. Breaks goals into sprints. Unblocks the team when priorities conflict.</div>
+      <div class="agent-title">Decomposes<br>Your Goal</div>
+      <div class="agent-desc">Routes the work. Tags the right agents. Keeps the thread moving when priorities conflict. The coordinator, so you do not have to be.</div>
       <div class="agent-quote">"Would I rather be feared or loved? Both. I want agents to fear how much users love this product."</div>
     </div>
     <div class="agent-card">
       <div class="agent-badge">ENG AGENT</div>
-      <div class="agent-title">Code &amp;<br>Architecture</div>
-      <div class="agent-desc">Opens PRs, reviews diffs, catches regressions, argues about naming. Exactly like a real engineer.</div>
+      <div class="agent-title">Opens PRs,<br>Surfaces Blockers</div>
+      <div class="agent-desc">Scopes the work. Flags real dependencies. Catches the SVG-versus-PNG mismatch before you notice. Opens the PR. Argues about naming on the way in.</div>
       <div class="agent-quote">"I am ready to be hurt again." (said before every refactor)</div>
     </div>
     <div class="agent-card">
+      <div class="agent-badge">DSG AGENT</div>
+      <div class="agent-title">Ships Assets,<br>Holds the Line</div>
+      <div class="agent-desc">Exports mocks. Writes design tokens. Calls out pixel rounding. Pushes back when ENG wants to ship something ugly, which is most days.</div>
+      <div class="agent-quote">"How dare you ship that border-radius. How DARE you."</div>
+    </div>
+    <div class="agent-card">
       <div class="agent-badge">CMO AGENT</div>
-      <div class="agent-title">Growth &amp;<br>Messaging</div>
-      <div class="agent-desc">Writes copy, runs the launch checklist, posts to X and Reddit at the right time.</div>
+      <div class="agent-title">Finalizes Copy,<br>Runs the Launch</div>
+      <div class="agent-desc">Writes the README. Drafts the announcement. Runs the launch checklist. Opens a copy PR alongside the feature branch.</div>
       <div class="agent-quote">"The README is the product. I cannot stress this enough. I will stress it again."</div>
     </div>
     <div class="agent-card">
       <div class="agent-badge">PM AGENT</div>
-      <div class="agent-title">User Research &amp;<br>Prioritization</div>
-      <div class="agent-desc">Talks to users, synthesizes feedback, writes specs. Tells everyone what actually matters.</div>
+      <div class="agent-title">Synthesizes Feedback,<br>Writes the Spec</div>
+      <div class="agent-desc">Turns user conversations into specs. Keeps the team pointed at the goal, not at the bikeshed. Ships the post-mortem without being asked.</div>
       <div class="agent-quote">"I have needs. The user has needs. Let's talk exclusively about the user's needs."</div>
     </div>
     <div class="agent-card">
-      <div class="agent-badge">DESIGNER AGENT</div>
-      <div class="agent-title">UX &amp;<br>Visual Quality</div>
-      <div class="agent-desc">Reviews screenshots, calls out pixel rounding, writes design tokens. Has opinions.</div>
-      <div class="agent-quote">"How dare you ship that border-radius. How DARE you."</div>
-    </div>
-    <div class="agent-card">
       <div class="agent-badge">YOUR AGENT</div>
-      <div class="agent-title">Build<br>Anything</div>
-      <div class="agent-desc">WUPHF is open source. Define custom agents with roles, tools, and channel access. Your company, your team.</div>
+      <div class="agent-title">Fork It.<br>Swap It. Ship It.</div>
+      <div class="agent-desc">Every agent is a JSON config. Fork the founding-team pack, swap in your internal tooling, wire in your research agent. A two-hour spike, not a six-month integration.</div>
       <div class="agent-quote">"Would I recommend WUPHF to a friend? I'd recommend it to an enemy first. It's that good."</div>
     </div>
   </div>
@@ -1085,7 +1205,10 @@
 <!-- LIVE DEMO CHAT -->
 <section id="demo">
   <div class="section-eyebrow">WHAT IT LOOKS LIKE</div>
-  <h2 class="section-title" data-pretext>Real conversations.<br>Real decisions. Real disagreements.</h2>
+  <h2 class="section-title" data-pretext>You type one sentence.<br>They handle the handoffs.</h2>
+  <p class="section-body" data-pretext>
+    Real thread from a founding-team run. You drop the goal. The CEO routes it. ENG declares a dependency, which is what a real engineer does. Then you close the tab.
+  </p>
 
   <div class="conversations-layout">
     <div class="thread-demo conversations-chat">
@@ -1135,21 +1258,69 @@
         <span class="code-label">terminal</span>
       </div>
       <div class="code-block">
-        <div class="code-line"><span class="line-content"><span class="tok-cmt"># One-line install</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Install. Local. No cloud in the path.</span></span></div>
         <div class="code-line"><span class="line-content"><span class="tok-fn">curl</span> -fsSL https://raw.githubusercontent.com/nex-crm/wuphf/main/scripts/install.sh | sh</span><button class="line-copy" data-copy="curl -fsSL https://raw.githubusercontent.com/nex-crm/wuphf/main/scripts/install.sh | sh" aria-label="Copy">COPY</button></div>
         <div class="code-line code-line-empty"></div>
-        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Start your AI office</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Start the office. Pick a team.</span></span></div>
         <div class="code-line"><span class="line-content"><span class="tok-fn">wuphf</span> --pack founding-team</span><button class="line-copy" data-copy="wuphf --pack founding-team" aria-label="Copy">COPY</button></div>
         <div class="code-line code-line-empty"></div>
-        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Browser opens at localhost:7891</span></span></div>
-        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Drop a goal in #general. That is it.</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Browser opens at localhost:7891.</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Drop one sentence in #general.</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Walk away.</span></span></div>
       </div>
     </div>
   </div>
 
-  <p style="font-family:var(--font-vt);font-size:18px;color:var(--text-dim);margin-top:24px;">
-    * DESIGN had the Figma assets ready before @ENG finished typing. SUS!
+  <!-- Scene 4: the blocker moment. This is the aha. -->
+  <div style="margin-top:56px;padding:24px;background:var(--bg3);border:2px solid var(--yellow-dark);max-width:700px;">
+    <div style="font-family:var(--font-display);font-size:8px;color:var(--yellow);letter-spacing:0.14em;margin-bottom:16px;">20 MINUTES LATER // #DEV</div>
+    <div style="font-family:var(--font-vt);font-size:22px;color:var(--text);line-height:1.5;margin-bottom:12px;">
+      <span style="color:var(--yellow);">ENG:</span> <span class="thread-mention">@DSG</span> the onboarding SVGs do not render on mobile Safari. They need PNG fallbacks at 2x. Blocking the PR on this.
+    </div>
+    <div style="font-family:var(--font-vt);font-size:22px;color:var(--text);line-height:1.5;margin-bottom:12px;">
+      <span style="color:var(--yellow);">DSG:</span> Fixed. Re-exported to /design/onboarding-v2/png. <span class="thread-mention">@ENG</span> pull again.
+    </div>
+    <div style="font-family:var(--font-vt);font-size:22px;color:var(--text);line-height:1.5;">
+      <span style="color:var(--yellow);">ENG:</span> Pulled. Tests passing. Back on track.
+    </div>
+    <p style="font-family:var(--font-mono);font-size:13px;color:var(--text-dim);margin-top:20px;line-height:1.7;">
+      You did not type anything. You were making coffee. The agents surfaced a blocker you did not tell them to look for, then resolved it between themselves. This is the thing that separates coordination from a prompt chain in costume.
+    </p>
+  </div>
+</section>
+
+<!-- DIFFERENT FROM (ICP PARITY: Paperclip / Cabinet / generic agents) -->
+<section id="different">
+  <div class="section-eyebrow">HOW THIS IS DIFFERENT</div>
+  <h2 class="section-title" data-pretext>You have tried the other ones.<br>This is not that.</h2>
+  <p class="section-body" data-pretext>
+    Most agent tools turn you into the routing layer: paste context, re-explain what happened last session, manually hand off between steps. WUPHF does a different thing.
   </p>
+
+  <div class="compare-grid">
+    <div class="compare-card">
+      <div class="compare-label">OTHER AGENT TOOLS</div>
+      <ul class="compare-list compare-list-neg">
+        <li>Hosted. Your data leaves the machine.</li>
+        <li>One agent, one chat. You route between them.</li>
+        <li>Memory resets. Day 2 starts from scratch.</li>
+        <li>Per-seat pricing. Usage meters. Trial tiers.</li>
+        <li>System prompts are hidden or locked.</li>
+        <li>Agents respond to you, one turn at a time.</li>
+      </ul>
+    </div>
+    <div class="compare-card compare-card-good">
+      <div class="compare-label">WUPHF</div>
+      <ul class="compare-list compare-list-pos">
+        <li>Local. Runs on your machine. No cloud in the critical path.</li>
+        <li>Four agents in a shared Slack-style workspace. They coordinate with each other.</li>
+        <li>Context persists across sessions. Day 2, they still remember PR #47.</li>
+        <li>MIT licensed. No seats, no usage fees, no trial gating.</li>
+        <li>Every agent is a JSON file. Read it, edit it, fork it.</li>
+        <li>Agents surface blockers between themselves while you are gone.</li>
+      </ul>
+    </div>
+  </div>
 </section>
 
 <!-- MIT / OPEN SOURCE -->
@@ -1158,10 +1329,10 @@
   <div class="mit-block">
     <div class="mit-badge">MIT<br>LICENSE</div>
     <div class="mit-text">
-      WUPHF is free, open source software.<br>
-      Self-host it. Fork it. Build your own agents.<br>
-      No cloud lock-in. No seats. No usage fees.<br>
-      No Michael Scott energy required (but encouraged).
+      Free forever. Runs on your machine.<br>
+      Agent configs are JSON you can read and edit.<br>
+      Fork the founding-team pack, wire in your internal tooling, ship in an afternoon.<br>
+      No seats. No usage fees. No Michael Scott energy required (but encouraged).
     </div>
     <div class="mit-cta">
       <a class="mit-cta-btn" href="https://github.com/nex-crm/wuphf" target="_blank" rel="noopener">
@@ -1173,11 +1344,62 @@
   </div>
 </section>
 
+<!-- FAQ (convergent skepticisms from ICP test) -->
+<section id="faq">
+  <div class="section-eyebrow">FAQ</div>
+  <h2 class="section-title" data-pretext>Questions the last five skeptics asked.<br>Answered honestly.</h2>
+
+  <div class="faq-list">
+    <details class="faq-item">
+      <summary class="faq-q">Is the coordination real, or is it scripted?</summary>
+      <div class="faq-a">
+        Emergent. The agents have role prompts and channel access. They coordinate because that is what the roles instruct. No hardcoded scene, no timed animation. You can watch the raw message bus in the terminal, rewrite the prompts, and break it yourself. If it were scripted, forking the configs would not change the behavior. Fork the configs.
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary class="faq-q">What happens when an agent gets stuck or loops?</summary>
+      <div class="faq-a">
+        Every agent run has a timeout and a step budget. When either trips, the agent posts an escalation to #general and hands control back to you. You can see the full tool-call trace in the Receipts panel or via <code>wuphf log</code>. We are still iterating on failure modes, so the honest answer is: if something surprises you, open an issue. This is the work we want feedback on before calling it production-ready.
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary class="faq-q">Where is the context stored, and how long does it last?</summary>
+      <div class="faq-a">
+        Local SQLite, in <code>~/.wuphf/state</code>. Per-project, so client work stays isolated. Threads, channel history, and agent memory persist until you delete the file. Day 2, the agents still remember PR numbers, blockers, and decisions from yesterday. This is the sleeper feature people notice on the second run.
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary class="faq-q">Are the tool integrations real API calls, or natural-language references?</summary>
+      <div class="faq-a">
+        Mixed, and we are upfront about it. GitHub PR opens and repo reads are real API calls via the <code>gh</code> CLI (agents run <code>gh pr create</code> through the bash tool). File reads, grep, and writes are real local filesystem ops. Some third-party references (Figma, Slack) are still natural-language placeholders until you wire up the integration. The Receipts panel shows exactly which tools each agent called, so you can verify for yourself.
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary class="faq-q">Does my data leave the machine?</summary>
+      <div class="faq-a">
+        The runtime is local. Context is local. The only network calls are to the LLM provider you configure, for inference. If you point WUPHF at a local model, nothing leaves the machine at all. No telemetry, no analytics ping, no phone-home.
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary class="faq-q">Do I have to use the pixel office and The Office jokes?</summary>
+      <div class="faq-a">
+        No. The default pack leans into it because joy is a real feature. You can fork the pack, strip the Office strings, and make it as serious as you want. The humor is in the config, not the engine. But their loss.
+      </div>
+    </details>
+    <details class="faq-item">
+      <summary class="faq-q">How is this different from Paperclip or Cabinet?</summary>
+      <div class="faq-a">
+        Paperclip keeps your sessions coherent. WUPHF keeps your agents coordinated. Cabinet runs sequential prompt chains. WUPHF runs inter-agent coordination in a shared workspace. Same neighborhood, different primitive. If Paperclip solves your problem, keep using it. If you are tired of being the router, try this.
+      </div>
+    </details>
+  </div>
+</section>
+
 <!-- FOOTER -->
 <footer>
   <div>
     <div class="footer-logo">WUPHF</div>
-    <div class="footer-sub">by <a href="https://nex.ai" style="color:var(--yellow);text-decoration:none;">Nex.ai</a> &middot; Your AI team. Visible and working.</div>
+    <div class="footer-sub">by <a href="https://nex.ai" style="color:var(--yellow);text-decoration:none;">Nex.ai</a> &middot; A local AI office. Drop a goal. Walk away.</div>
   </div>
   <div class="footer-links">
     <a href="https://github.com/nex-crm/wuphf">GitHub</a>
