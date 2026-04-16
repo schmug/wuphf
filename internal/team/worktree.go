@@ -42,7 +42,9 @@ func defaultPrepareTaskWorktree(taskID string) (string, string, error) {
 		return "", "", fmt.Errorf("prepare task worktree root: %w", err)
 	}
 	path := filepath.Join(root, "wuphf-task-"+sanitizeWorktreeToken(taskID))
+	_ = runGit(repoRoot, "worktree", "prune")
 	_ = cleanupTaskWorktreeAtRepoRoot(repoRoot, path, branch)
+	_ = clearStaleTaskBranch(repoRoot, branch)
 	finish := func(path, branch string) (string, string, error) {
 		if err := overlaySourceWorkspace(repoRoot, path); err != nil {
 			_ = cleanupTaskWorktreeAtRepoRoot(repoRoot, path, branch)
@@ -58,7 +60,9 @@ func defaultPrepareTaskWorktree(taskID string) (string, string, error) {
 	if firstErr == nil {
 		return finish(path, branch)
 	}
+	_ = runGit(repoRoot, "worktree", "prune")
 	_ = cleanupTaskWorktreeAtRepoRoot(repoRoot, path, branch)
+	_ = clearStaleTaskBranch(repoRoot, branch)
 	if err := runGit(repoRoot, "worktree", "add", "-b", branch, path, "HEAD"); err == nil {
 		return finish(path, branch)
 	}
@@ -67,6 +71,21 @@ func defaultPrepareTaskWorktree(taskID string) (string, string, error) {
 	}
 
 	return "", "", fmt.Errorf("create git worktree for %s: %w", taskID, firstErr)
+}
+
+func clearStaleTaskBranch(repoRoot, branch string) error {
+	branch = strings.TrimSpace(branch)
+	if branch == "" || !gitRefExists(repoRoot, "refs/heads/"+branch) {
+		return nil
+	}
+	if err := runGit(repoRoot, "branch", "-D", branch); err == nil {
+		return nil
+	}
+	_ = runGit(repoRoot, "worktree", "prune")
+	if !gitRefExists(repoRoot, "refs/heads/"+branch) {
+		return nil
+	}
+	return runGit(repoRoot, "branch", "-D", branch)
 }
 
 func defaultCleanupTaskWorktree(path, branch string) error {
