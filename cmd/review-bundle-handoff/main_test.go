@@ -105,7 +105,13 @@ func TestResolveOutDir(t *testing.T) {
 }
 
 func TestCheckedInBundleStaysBlockedUntilClientApproval(t *testing.T) {
-	inputs, err := loadBundle(filepath.Join("..", "..", "docs", "youtube-factory", "generated", "script-packet-inbox-operator-review-bundle"))
+	dir := t.TempDir()
+	writeFixtureBundle(t, dir, "pending_external_approval", []string{
+		"loopsmith_reviewer: Reviewer (approved)",
+		"client_operator: Pilot Client Alpha (pending)",
+	}, true)
+
+	inputs, err := loadBundle(dir)
 	if err != nil {
 		t.Fatalf("loadBundle() error = %v", err)
 	}
@@ -179,7 +185,13 @@ func TestBuildApprovalGateBlocksContradictoryArtifacts(t *testing.T) {
 }
 
 func TestCheckedInApprovedBundleReleasesConsumers(t *testing.T) {
-	inputs, err := loadBundle(filepath.Join("..", "..", "docs", "youtube-factory", "generated", "live-client-pilot", "script-packet-inbox-operator-approved-review-bundle"))
+	dir := t.TempDir()
+	writeFixtureBundle(t, dir, "approved", []string{
+		"loopsmith_reviewer: Reviewer (approved)",
+		"client_operator: Pilot Client Alpha (approved)",
+	}, true)
+
+	inputs, err := loadBundle(dir)
 	if err != nil {
 		t.Fatalf("loadBundle() error = %v", err)
 	}
