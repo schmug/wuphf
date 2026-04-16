@@ -1140,23 +1140,11 @@ func TestChannelDescriptionsAreVisibleButContentStaysRestricted(t *testing.T) {
 		t.Fatalf("failed to start broker: %v", err)
 	}
 	defer b.Stop()
-	b.mu.Lock()
-	b.members = []officeMember{
-		{Slug: "ceo", Name: "CEO", Role: "CEO", BuiltIn: true},
-		{Slug: "pm", Name: "Product Manager", Role: "Product Manager"},
-		{Slug: "fe", Name: "Frontend Engineer", Role: "Frontend Engineer"},
-		{Slug: "cmo", Name: "CMO", Role: "CMO"},
-	}
-	b.channels = []teamChannel{{
-		Slug:        "general",
-		Name:        "general",
-		Description: "Company-wide room",
-		Members:     []string{"ceo", "pm", "fe", "cmo"},
-	}}
-	b.normalizeLoadedStateLocked()
-	b.mu.Unlock()
 
 	base := fmt.Sprintf("http://%s", b.Addr())
+	createOfficeMemberForTest(t, base, b.Token(), "pm", "Product Manager", "Product Manager")
+	createOfficeMemberForTest(t, base, b.Token(), "fe", "Frontend Engineer", "Frontend Engineer")
+	createOfficeMemberForTest(t, base, b.Token(), "cmo", "CMO", "CMO")
 
 	createBody, _ := json.Marshal(map[string]any{
 		"action":      "create",
@@ -1242,29 +1230,39 @@ func TestChannelUpdateMutatesDescriptionAndMembers(t *testing.T) {
 		t.Fatalf("failed to start broker: %v", err)
 	}
 	defer b.Stop()
-	b.mu.Lock()
-	b.members = []officeMember{
-		{Slug: "ceo", Name: "CEO", Role: "CEO", BuiltIn: true},
-		{Slug: "research-lead", Name: "Research Lead", Role: "Research"},
-		{Slug: "scriptwriter", Name: "Scriptwriter", Role: "Scripts"},
-		{Slug: "growth-ops", Name: "Growth Ops", Role: "Growth"},
-	}
-	b.channels = []teamChannel{{
-		Slug:        "general",
-		Name:        "general",
-		Description: "Company-wide room",
-		Members:     []string{"ceo", "research-lead", "scriptwriter", "growth-ops"},
-	}, {
-		Slug:        "yt-research",
-		Name:        "yt-research",
-		Description: "Old description",
-		Members:     []string{"ceo", "research-lead"},
-		Disabled:    []string{"scriptwriter"},
-	}}
-	b.normalizeLoadedStateLocked()
-	b.mu.Unlock()
 
 	base := fmt.Sprintf("http://%s", b.Addr())
+	createOfficeMemberForTest(t, base, b.Token(), "research-lead", "Research Lead", "Research")
+	createOfficeMemberForTest(t, base, b.Token(), "scriptwriter", "Scriptwriter", "Scripts")
+	createOfficeMemberForTest(t, base, b.Token(), "growth-ops", "Growth Ops", "Growth")
+
+	createBody, _ := json.Marshal(map[string]any{
+		"action":      "create",
+		"slug":        "yt-research",
+		"name":        "yt-research",
+		"description": "Old description",
+		"members":     []string{"research-lead"},
+		"created_by":  "ceo",
+	})
+	createReq, _ := http.NewRequest(http.MethodPost, base+"/channels", bytes.NewReader(createBody))
+	createReq.Header.Set("Authorization", "Bearer "+b.Token())
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp, err := http.DefaultClient.Do(createReq)
+	if err != nil {
+		t.Fatalf("create seed channel failed: %v", err)
+	}
+	if createResp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(createResp.Body)
+		createResp.Body.Close()
+		t.Fatalf("expected 200 creating seed channel, got %d: %s", createResp.StatusCode, raw)
+	}
+	createResp.Body.Close()
+	b.mu.Lock()
+	if ch := b.findChannelLocked("yt-research"); ch != nil {
+		ch.Disabled = []string{"scriptwriter"}
+	}
+	b.mu.Unlock()
+
 	updateBody, _ := json.Marshal(map[string]any{
 		"action":      "update",
 		"slug":        "yt-research",
@@ -1300,6 +1298,29 @@ func TestChannelUpdateMutatesDescriptionAndMembers(t *testing.T) {
 	}
 	if containsString(payload.Channel.Disabled, "scriptwriter") {
 		t.Fatalf("expected disabled list to drop removed/now-enabled members, got %+v", payload.Channel.Disabled)
+	}
+}
+
+func createOfficeMemberForTest(t *testing.T, base, token, slug, name, role string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{
+		"action":     "create",
+		"slug":       slug,
+		"name":       name,
+		"role":       role,
+		"created_by": "ceo",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/office-members", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create office member %s failed: %v", slug, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 creating office member %s, got %d: %s", slug, resp.StatusCode, raw)
 	}
 }
 
