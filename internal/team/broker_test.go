@@ -816,6 +816,73 @@ func TestChannelMembersRejectUnknownOfficeMember(t *testing.T) {
 	}
 }
 
+// TestChannelMembersRejectDisableOrRemoveOfLead verifies that /channel-members
+// refuses to disable or remove a BuiltIn member (lead agent) from any
+// channel. Before this guard was generalized, only the hardcoded "ceo"
+// slug was protected — blueprint teams whose lead is something else (e.g.
+// niche-crm uses "operator") could silently lose their lead from #general.
+func TestChannelMembersRejectDisableOrRemoveOfLead(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.members = []officeMember{
+		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
+	}
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"operator", "builder"}, CreatedBy: "wuphf", CreatedAt: now, UpdatedAt: now},
+	}
+	b.mu.Unlock()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	for _, action := range []string{"disable", "remove"} {
+		body, _ := json.Marshal(map[string]any{
+			"action":  action,
+			"channel": "general",
+			"slug":    "operator",
+		})
+		req, _ := http.NewRequest(http.MethodPost, base+"/channel-members", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("action=%s: expected 400 (cannot remove/disable lead), got %d", action, resp.StatusCode)
+		}
+	}
+
+	// After the rejected attempts, operator must still be a member of #general.
+	b.mu.Lock()
+	var found bool
+	for _, ch := range b.channels {
+		if ch.Slug == "general" {
+			for _, m := range ch.Members {
+				if m == "operator" {
+					found = true
+					break
+				}
+			}
+			break
+		}
+	}
+	b.mu.Unlock()
+	if !found {
+		t.Fatalf("expected operator to remain in #general after rejected disable/remove")
+	}
+}
+
 func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
@@ -6002,5 +6069,111 @@ func TestHeadlessQueue_NoTimerDrivenWakeup(t *testing.T) {
 	}
 	if len(l.headlessWorkers) != 0 {
 		t.Fatalf("expected no workers started without an explicit enqueue, got %v", l.headlessWorkers)
+	}
+}
+
+// ensureDefaultOfficeMembersLocked must seed the full default manifest ONLY
+// when there are no existing members. Its prior behavior (append-any-missing-
+// default) was the source of the load-path leak: blueprint-seeded teams saw
+// ceo/planner/executor/reviewer re-appended on every broker Load.
+func TestEnsureDefaultOfficeMembersSeedsWhenEmpty(t *testing.T) {
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = nil
+	b.ensureDefaultOfficeMembersLocked()
+	got := len(b.members)
+	b.mu.Unlock()
+	if got == 0 {
+		t.Fatalf("expected defaults to be seeded when members empty, got 0")
+	}
+	defaults := defaultOfficeMembers()
+	if len(defaults) != got {
+		t.Fatalf("expected exactly the default roster (len=%d), got len=%d", len(defaults), got)
+	}
+}
+
+// REGRESSION: if a blueprint has seeded members (e.g. operator/planner/builder/
+// growth/reviewer for niche-crm), ensureDefaultOfficeMembersLocked must NOT
+// append ceo/planner/executor/reviewer on top.
+func TestEnsureDefaultOfficeMembersNoOpWhenNonEmpty(t *testing.T) {
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "plan", BuiltIn: true},
+		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto"},
+	}
+	b.ensureDefaultOfficeMembersLocked()
+	got := make([]string, 0, len(b.members))
+	for _, m := range b.members {
+		got = append(got, m.Slug)
+	}
+	b.mu.Unlock()
+
+	want := []string{"operator", "builder"}
+	if len(got) != len(want) {
+		t.Fatalf("expected roster unchanged %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected roster unchanged %v, got %v", want, got)
+		}
+	}
+	for _, m := range got {
+		if m == "ceo" || m == "planner" || m == "executor" || m == "reviewer" {
+			t.Fatalf("default slug %q appended into blueprint roster; roster=%v", m, got)
+		}
+	}
+}
+
+// REGRESSION: simulate a fully-seeded blueprint team, save to disk, load into
+// a fresh broker, confirm the team survives unchanged. This is the load-path
+// leak the design doc calls out — prior append-behavior in
+// ensureDefaultOfficeMembersLocked (called from Broker.Load() at broker.go:2260)
+// silently re-added ceo/planner/executor/reviewer.
+func TestLoadDoesNotAppendDefaultsAfterBlueprintSeed(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.members = []officeMember{
+		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "planner", Name: "Planner", Role: "Planner", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "growth", Name: "Growth", Role: "Growth", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
+	}
+	// Seed a task so saveLocked doesn't short-circuit on default state.
+	b.tasks = []teamTask{{ID: "niche-crm-1", Channel: "general", Title: "Choose the niche", Status: "open", CreatedBy: "wuphf", CreatedAt: now, UpdatedAt: now}}
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("saveLocked failed: %v", err)
+	}
+	b.mu.Unlock()
+
+	reloaded := NewBroker()
+	reloaded.mu.Lock()
+	slugs := make([]string, 0, len(reloaded.members))
+	for _, m := range reloaded.members {
+		slugs = append(slugs, m.Slug)
+	}
+	reloaded.mu.Unlock()
+
+	want := []string{"operator", "planner", "builder", "growth", "reviewer"}
+	if len(slugs) != len(want) {
+		t.Fatalf("expected blueprint roster %v to survive reload, got %v", want, slugs)
+	}
+	for i := range want {
+		if slugs[i] != want[i] {
+			t.Fatalf("expected blueprint roster %v to survive reload, got %v", want, slugs)
+		}
+	}
+	for _, s := range slugs {
+		if s == "ceo" || s == "executor" {
+			t.Fatalf("default slug %q leaked into reloaded roster: %v", s, slugs)
+		}
 	}
 }

@@ -2669,17 +2669,18 @@ func (b *Broker) ensureDefaultChannelsLocked() {
 	}
 }
 
+// ensureDefaultOfficeMembersLocked seeds the DefaultManifest roster ONLY when
+// no members exist. Prior implementation appended any missing default slug to
+// a non-empty roster, which caused ceo/planner/executor/reviewer to leak back
+// into blueprint-seeded teams (e.g. niche-crm) on every Broker.Load(). The
+// function is called from broker init (line 831) and post-load normalization
+// (line 2260) as a true recovery hook: if state was corrupted or never
+// seeded, fall back to defaults.
 func (b *Broker) ensureDefaultOfficeMembersLocked() {
-	if len(b.members) == 0 {
-		b.members = defaultOfficeMembers()
+	if len(b.members) > 0 {
 		return
 	}
-	defaults := defaultOfficeMembers()
-	for _, member := range defaults {
-		if b.findMemberLocked(member.Slug) == nil {
-			b.members = append(b.members, member)
-		}
-	}
+	b.members = defaultOfficeMembers()
 }
 
 func (b *Broker) normalizeLoadedStateLocked() {
@@ -6096,14 +6097,20 @@ func (b *Broker) handleChannelMembers(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "channel not found", http.StatusNotFound)
 			return
 		}
-		if b.findMemberLocked(member) == nil {
+		memberRecord := b.findMemberLocked(member)
+		if memberRecord == nil {
 			b.mu.Unlock()
 			http.Error(w, "member not found", http.StatusNotFound)
 			return
 		}
-		if member == "ceo" && (action == "remove" || action == "disable") {
+		// Lead agents (BuiltIn) cannot be disabled or removed from any
+		// channel. The blueprint's lead is the tag target for the onboarding
+		// kickoff and the default owner for channel membership; the UI locks
+		// these interactions too. Keeps the "ceo" literal as a legacy guard
+		// for team states that predate the BuiltIn field.
+		if (memberRecord.BuiltIn || member == "ceo") && (action == "remove" || action == "disable") {
 			b.mu.Unlock()
-			http.Error(w, "cannot remove or disable CEO", http.StatusBadRequest)
+			http.Error(w, "cannot remove or disable lead agent", http.StatusBadRequest)
 			return
 		}
 		switch action {

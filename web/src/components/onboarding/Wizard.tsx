@@ -22,6 +22,10 @@ interface BlueprintAgent {
   role: string
   emoji?: string
   checked?: boolean
+  // built_in marks the lead agent — always included, never removable.
+  // The backend also refuses to disable or remove a BuiltIn member, so
+  // even if someone bypassed this UI, the broker would reject the write.
+  built_in?: boolean
 }
 
 interface TaskTemplate {
@@ -34,10 +38,13 @@ interface TaskTemplate {
 
 type WizardStep = 'welcome' | 'templates' | 'identity' | 'team' | 'setup' | 'task'
 
+// Step order: company info before blueprint. The blueprint picker is a
+// decision about how the office starts; it makes more sense after the
+// user has anchored who they are than as the very first question.
 const STEP_ORDER: readonly WizardStep[] = [
   'welcome',
-  'templates',
   'identity',
+  'templates',
   'team',
   'setup',
   'task',
@@ -243,7 +250,7 @@ function TemplatesStep({
           Back
         </button>
         <button className="btn btn-primary" onClick={onNext} type="button">
-          Continue
+          Review the team
           <ArrowIcon />
         </button>
       </div>
@@ -329,7 +336,7 @@ function IdentityStep({
           disabled={!canContinue}
           type="button"
         >
-          Review the team
+          Choose a blueprint
           <ArrowIcon />
         </button>
       </div>
@@ -363,25 +370,39 @@ function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
           </div>
         ) : (
           <div className="wiz-team-grid">
-            {agents.map((a) => (
-              <button
-                key={a.slug}
-                className={`wiz-team-tile ${a.checked ? 'selected' : ''}`}
-                onClick={() => onToggle(a.slug)}
-                type="button"
-              >
-                <div className="wiz-team-check">
-                  {a.checked && <CheckIcon />}
-                </div>
-                <div>
-                  {a.emoji && (
-                    <span style={{ marginRight: 6 }}>{a.emoji}</span>
-                  )}
-                  <span className="wiz-team-name">{a.name}</span>
-                  {a.role && <div className="wiz-team-role">{a.role}</div>}
-                </div>
-              </button>
-            ))}
+            {agents.map((a) => {
+              // Lead agent is always included and cannot be unchecked here.
+              // The backend also refuses to remove or disable any BuiltIn
+              // member, so this is UI belt + server-side braces.
+              const locked = a.built_in === true
+              return (
+                <button
+                  key={a.slug}
+                  className={`wiz-team-tile ${a.checked ? 'selected' : ''} ${locked ? 'locked' : ''}`}
+                  onClick={() => !locked && onToggle(a.slug)}
+                  type="button"
+                  disabled={locked}
+                  aria-disabled={locked}
+                  title={locked ? 'Lead agent — always included' : undefined}
+                >
+                  <div className="wiz-team-check">
+                    {a.checked && <CheckIcon />}
+                  </div>
+                  <div>
+                    {a.emoji && (
+                      <span style={{ marginRight: 6 }}>{a.emoji}</span>
+                    )}
+                    <span className="wiz-team-name">{a.name}</span>
+                    {locked && (
+                      <span className="wiz-team-lead-badge" aria-label="Lead">
+                        Lead
+                      </span>
+                    )}
+                    {a.role && <div className="wiz-team-role">{a.role}</div>}
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
       </div>
@@ -736,12 +757,16 @@ export function Wizard({ onComplete }: WizardProps) {
     }
   }, [step])
 
-  // Toggle agent selection
+  // Toggle agent selection. The lead agent (built_in) is locked: TeamStep
+  // disables its button, and this guard prevents any programmatic path
+  // (keyboard, devtools, future bulk toggle) from unchecking it.
   const toggleAgent = useCallback((slug: string) => {
     setAgents((prev) =>
-      prev.map((a) =>
-        a.slug === slug ? { ...a, checked: !a.checked } : a,
-      ),
+      prev.map((a) => {
+        if (a.slug !== slug) return a
+        if (a.built_in === true) return a
+        return { ...a, checked: !a.checked }
+      }),
     )
   }, [])
 
@@ -809,7 +834,7 @@ export function Wizard({ onComplete }: WizardProps) {
         <ProgressDots current={step} />
 
         {step === 'welcome' && (
-          <WelcomeStep onNext={() => goTo('templates')} />
+          <WelcomeStep onNext={() => goTo('identity')} />
         )}
 
         {step === 'templates' && (
