@@ -20,7 +20,18 @@
 .message-text code { background: var(--bg-warm); border-radius: 4px; padding: 1px 5px; font-family: var(--font-mono); font-size: 12px; }
 
 /* ─── Date separator ─── */
-.date-separator { display: flex; align-items: center; justify-content: center; padding: 8px 0; position: sticky; top: 0; z-index: 5; background: var(--bg); }
+.date-separator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: sticky;
+  top: -8px;
+  z-index: 5;
+  background: var(--bg);
+  padding: 6px 24px;
+  margin: 0 -24px;
+  box-sizing: border-box;
+}
 .date-separator-line { display: none; }
 .date-separator-text { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; font-weight: 600; background: var(--bg-warm); padding: 2px 10px; border-radius: 999px; }
 
@@ -170,7 +181,7 @@
 .autocomplete-item-icon { width: 20px; text-align: center; flex-shrink: 0; font-size: 14px; }
 .autocomplete-item-label { font-weight: 600; color: var(--text); }
 .autocomplete-item-desc { font-size: 12px; color: var(--text-tertiary); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
-.composer-inner { display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 4px 4px 4px 14px; transition: border-color 0.2s; }
+.composer-inner { display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 8px 8px 16px; transition: border-color 0.2s; }
 .composer-inner:focus-within { border-color: var(--accent); }
 .composer-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 14px; color: var(--text); outline: none; resize: none; min-height: 28px; max-height: 120px; line-height: 1.5; padding: 4px 0; align-self: center; }
 .composer-input::placeholder { color: var(--text-tertiary); }

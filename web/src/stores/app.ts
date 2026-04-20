@@ -31,6 +31,8 @@ export interface AppStore {
   // Sidebar
   sidebarAgentsOpen: boolean
   toggleSidebarAgents: () => void
+  sidebarCollapsed: boolean
+  toggleSidebarCollapsed: () => void
 
   // Thread panel
   activeThreadId: string | null
@@ -85,6 +87,8 @@ export const useAppStore = create<AppStore>((set) => ({
 
   sidebarAgentsOpen: true,
   toggleSidebarAgents: () => set((s) => ({ sidebarAgentsOpen: !s.sidebarAgentsOpen })),
+  sidebarCollapsed: false,
+  toggleSidebarCollapsed: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
   activeThreadId: null,
   setActiveThreadId: (id) => set({ activeThreadId: id }),

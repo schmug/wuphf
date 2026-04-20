@@ -11,6 +11,7 @@ import {
   Page,
   Search,
   Settings,
+  BookStack,
 } from 'iconoir-react'
 import { SIDEBAR_APPS } from '../../lib/constants'
 import { useAppStore } from '../../stores/app'
@@ -18,6 +19,7 @@ import { getRequests } from '../../api/client'
 
 const APP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   studio: Play,
+  wiki: BookStack,
   tasks: CheckCircle,
   requests: ClipboardCheck,
   policies: Shield,

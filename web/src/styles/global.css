@@ -189,9 +189,11 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .status-dot.lurking { background: #9ca3af; width: 4px; height: 4px; }
 
 /* ─── Scrollbar ─── */
-::-webkit-scrollbar { width: 6px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+:hover::-webkit-scrollbar-thumb { background: var(--border); }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
 
 /* ─── SR-only ─── */

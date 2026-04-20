@@ -133,7 +133,7 @@ html[data-theme="nex"] body {
 }
 
 /* ═══ SCROLLBAR ═══ */
-html[data-theme="nex"] ::-webkit-scrollbar { width: 6px; }
+html[data-theme="nex"] ::-webkit-scrollbar { width: 6px; height: 6px; }
 html[data-theme="nex"] ::-webkit-scrollbar-track { background: transparent; }
 html[data-theme="nex"] ::-webkit-scrollbar-thumb {
   background: var(--border-dark);
@@ -699,8 +699,8 @@ html[data-theme="nex"] .composer-inner {
   background: var(--bg);
   border: 1px solid var(--border-dark);
   border-radius: var(--radius-lg);
-  padding: 12px 16px;
-  min-height: 44px;
+  padding: 8px 8px 8px 16px;
+  min-height: 36px;
   transition: border-color 0.15s;
 }
 html[data-theme="nex"] .composer-inner:focus-within {

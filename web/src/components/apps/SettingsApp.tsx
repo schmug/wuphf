@@ -8,6 +8,7 @@ import {
   Timer,
   Terminal,
   WarningTriangle,
+  Refresh,
 } from 'iconoir-react'
 import {
   getConfig,
@@ -974,7 +975,7 @@ function DangerZoneSection() {
       {/* RESET — narrow: broker runtime state only */}
       <div style={dangerStyles.card('warn')}>
         <div style={dangerStyles.cardTitle}>
-          <span>{'\u{1F501}'}</span>
+          <Refresh width={16} height={16} />
           <span>Reset broker state</span>
         </div>
         <div style={dangerStyles.cardSubtitle}>
