@@ -65,25 +65,30 @@ export interface AppStore {
   setWikiPath: (path: string | null) => void
 }
 
-export const useAppStore = create<AppStore>((set) => ({
+export const useAppStore = create<AppStore>((set, get) => ({
   brokerConnected: false,
   setBrokerConnected: (v) => set({ brokerConnected: v }),
 
   currentChannel: 'general',
   setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null }),
   currentApp: null,
-  setCurrentApp: (app) =>
-    set((s) =>
-      app
-        ? s.dmMode
-          ? { currentApp: app, dmMode: false, dmAgentSlug: null, currentChannel: 'general' }
-          : { currentApp: app }
-        : { currentApp: null },
-    ),
+  setCurrentApp: (app) => {
+    if (!app) {
+      set({ currentApp: null })
+      return
+    }
+
+    if (get().dmMode) {
+      set({ currentApp: app, dmMode: false, dmAgentSlug: null, currentChannel: 'general' })
+      return
+    }
+
+    set({ currentApp: app })
+  },
 
   channelMeta: {},
   setChannelMeta: (slug, meta) =>
-    set((s) => ({ channelMeta: { ...s.channelMeta, [slug]: meta } })),
+    set({ channelMeta: { ...get().channelMeta, [slug]: meta } }),
 
   theme: 'nex',
   setTheme: (t) => {
@@ -92,9 +97,9 @@ export const useAppStore = create<AppStore>((set) => ({
   },
 
   sidebarAgentsOpen: true,
-  toggleSidebarAgents: () => set((s) => ({ sidebarAgentsOpen: !s.sidebarAgentsOpen })),
+  toggleSidebarAgents: () => set({ sidebarAgentsOpen: !get().sidebarAgentsOpen }),
   sidebarCollapsed: false,
-  toggleSidebarCollapsed: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  toggleSidebarCollapsed: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
 
   activeThreadId: null,
   setActiveThreadId: (id) => set({ activeThreadId: id }),
