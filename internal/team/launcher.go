@@ -105,6 +105,12 @@ type Launcher struct {
 	paneBackedAgents     bool // web mode may spawn per-agent tmux panes; true when panes are live
 	noOpen               bool
 
+	// failedPaneSlugs records agents whose tmux pane/window creation failed.
+	// agentPaneTargets() omits them so the pane-capture loops don't spin on
+	// missing targets (which produces "stopped after 5 failures" spam). These
+	// agents fall back to the headless dispatch path automatically.
+	failedPaneSlugs map[string]string
+
 	notifyMu            sync.Mutex
 	notifyLastDelivered map[string]time.Time
 }
@@ -530,10 +536,20 @@ func (l *Launcher) notifyOfficeChangesLoop() {
 // paneBackedAgents state by no-op'ing. Errors are logged but do not propagate
 // — failing to respawn leaves the previous panes running (degraded, but the
 // headless path can still deliver).
+//
+// We re-read the configured provider first because the install-wide
+// provider may have changed since the launcher was constructed (user
+// switched to Codex in Settings). reconfigureVisibleAgents tears down the
+// tmux session if we're now on codex.
 func (l *Launcher) respawnPanesAfterReseed() {
-	if l == nil || l.usesCodexRuntime() || !l.paneBackedAgents {
+	if l == nil {
 		return
 	}
+	l.provider = config.ResolveLLMProvider("")
+	// If we're on codex, still let reconfigureVisibleAgents run so it can
+	// kill any stale claude tmux session from a previous provider choice.
+	// And if we were codex and switched to claude-code, allow pane spawn
+	// to bootstrap for the first time by not short-circuiting here.
 	if err := l.reconfigureVisibleAgents(); err != nil {
 		log.Printf("office_reseeded: respawn panes failed: %v", err)
 	}
@@ -667,22 +683,22 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	l.notifyMu.Unlock()
 	immediate = filtered
 
-	// Broadcast stage update only for untagged messages in public channels.
-	// Never in DMs — DMs are private 1:1 conversations, no routing noise.
+	// When a human posts an untagged message in a public channel, mark the
+	// implicit routing targets as "typing" so the existing TypingIndicator
+	// renders "X is thinking..." as ephemeral system text above the chat.
+	// This replaces the older "Routing to @X..." persisted system message
+	// — that was a stored chat message the user had to scroll past forever
+	// even after the agent replied. The typing indicator is pure UI state
+	// driven off lastTaggedAt; it auto-clears the moment the agent posts
+	// (delete in handleMessages / PostMessage paths), so nothing to
+	// garbage-collect. DMs and 1:1 mode suppress the signal.
 	isDM, _ := l.isChannelDM(normalizeChannelSlug(msg.Channel))
 	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") && !l.isOneOnOne() && !isDM && len(msg.Tagged) == 0 {
-		names := make([]string, 0, len(immediate))
+		slugs := make([]string, 0, len(immediate))
 		for _, t := range immediate {
-			names = append(names, "@"+t.Slug)
+			slugs = append(slugs, t.Slug)
 		}
-		channel := msg.Channel
-		if channel == "" {
-			channel = "general"
-		}
-		l.broker.PostSystemMessage(channel,
-			fmt.Sprintf("Routing to %s...", strings.Join(names, ", ")),
-			"routing",
-		)
+		l.broker.MarkRoutingTargets(slugs)
 	}
 
 	for _, target := range immediate {
@@ -1770,7 +1786,7 @@ func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
 		if slug != "" {
 			targets[slug] = notificationTarget{
 				Slug:       slug,
-				PaneTarget: fmt.Sprintf("%s:team.1", l.sessionName),
+				PaneTarget: l.resolvePaneTarget(slug, fmt.Sprintf("%s:team.1", l.sessionName)),
 			}
 		}
 		return targets
@@ -1778,16 +1794,37 @@ func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
 	for i, member := range l.visibleOfficeMembers() {
 		targets[member.Slug] = notificationTarget{
 			Slug:       member.Slug,
-			PaneTarget: fmt.Sprintf("%s:team.%d", l.sessionName, i+1),
+			PaneTarget: l.resolvePaneTarget(member.Slug, fmt.Sprintf("%s:team.%d", l.sessionName, i+1)),
 		}
 	}
 	for _, member := range l.overflowOfficeMembers() {
 		targets[member.Slug] = notificationTarget{
 			Slug:       member.Slug,
-			PaneTarget: fmt.Sprintf("%s:%s.0", l.sessionName, overflowWindowName(member.Slug)),
+			PaneTarget: l.resolvePaneTarget(member.Slug, fmt.Sprintf("%s:%s.0", l.sessionName, overflowWindowName(member.Slug))),
 		}
 	}
 	return targets
+}
+
+// resolvePaneTarget returns the tmux pane target for a slug, or "" when the
+// slug has no live pane — either because its spawn failed earlier, or
+// because it's bound to codex and uses the headless pipeline. An empty
+// PaneTarget tells the pane-capture loop to skip polling (see
+// startPaneCaptureLoops) while still leaving the slug in the notification
+// target map so non-pane dispatch (e.g. wakeLeadAfterSpecialist in the
+// codex runtime) can find the target by slug.
+func (l *Launcher) resolvePaneTarget(slug, fallback string) string {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return ""
+	}
+	if _, bad := l.failedPaneSlugs[slug]; bad {
+		return ""
+	}
+	if l.memberEffectiveProviderKind(slug) == provider.KindCodex {
+		return ""
+	}
+	return fallback
 }
 
 func (l *Launcher) isOneOnOne() bool {
@@ -2013,6 +2050,21 @@ func (l *Launcher) ReconfigureSession() error {
 }
 
 func (l *Launcher) reconfigureVisibleAgents() error {
+	// Re-read the configured provider in case the user changed it in
+	// Settings after launch. Without this, a user who switched install-wide
+	// from claude-code to codex post-onboarding would keep getting claude
+	// panes on respawn — the stale l.provider snapshot from NewLauncher
+	// time. If the new provider is codex, skip pane machinery entirely;
+	// codex dispatch runs through headless_codex.go.
+	l.provider = config.ResolveLLMProvider("")
+	if l.usesCodexRuntime() {
+		if l.paneBackedAgents {
+			_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+			l.paneBackedAgents = false
+		}
+		return nil
+	}
+
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
 		return fmt.Errorf("prepare mcp config: %w", err)
@@ -2022,6 +2074,10 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 	if err := provider.ResetClaudeSessions(); err != nil {
 		return fmt.Errorf("reset Claude sessions: %w", err)
 	}
+
+	// Reset stale pane-spawn failures from a previous reconfigure so codex
+	// agents (or agents whose spawn failed earlier) get a clean retry.
+	l.failedPaneSlugs = nil
 
 	// Use respawn-pane to restart agent processes IN PLACE.
 	// This preserves pane sizes and positions (no layout reset).
@@ -2042,6 +2098,7 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 			return err
 		}
 		l.spawnOverflowAgents()
+		go l.detectDeadPanesAfterSpawn(visibleMembers)
 		if l.broker != nil {
 			go l.primeVisibleAgents()
 		}
@@ -2058,19 +2115,33 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 		cmd, err := l.claudeCommand(slug, l.buildPrompt(slug))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "respawn pane for %s: %v\n", slug, err)
+			l.recordPaneSpawnFailure(slug, fmt.Sprintf("claudeCommand: %v", err))
 			continue
 		}
 
 		target := fmt.Sprintf("%s:team.%d", l.sessionName, idx)
 		// respawn-pane -k kills the current process and starts a new one
 		// in the same pane — preserving size and position
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
 			"-t", target,
 			"-c", l.cwd,
 			cmd,
-		).Run()
+		).CombinedOutput()
+		if err != nil {
+			detail := strings.TrimSpace(string(out))
+			reason := err.Error()
+			if detail != "" {
+				reason = fmt.Sprintf("%s (tmux: %s)", reason, detail)
+			}
+			fmt.Fprintf(os.Stderr,
+				"  Agents:  respawn-pane for %s failed (%s); falling back to headless\n",
+				slug, reason,
+			)
+			l.recordPaneSpawnFailure(slug, reason)
+		}
 	}
 	l.spawnOverflowAgents()
+	go l.detectDeadPanesAfterSpawn(visibleMembers)
 
 	if l.broker != nil {
 		go l.primeVisibleAgents()
@@ -2964,18 +3035,34 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 		return nil, fmt.Errorf("spawn first agent: %w (tmux: %s)", err, detail)
 	}
 
-	// Remaining agents: split from agent area, then use "tiled" layout
+	// Remaining agents: split from agent area, then use "tiled" layout. First
+	// agent (pane 1) is mandatory — a failure there aborts the whole launch.
+	// Subsequent splits can fail individually (e.g. terminal too small to
+	// accommodate another tile); record the failure and fall those agents
+	// back to headless dispatch so the capture loop doesn't hunt ghost panes.
 	for i := 1; i < len(visible); i++ {
 		agentCmd, err := l.claudeCommand(visible[i].Slug, l.buildPrompt(visible[i].Slug))
 		if err != nil {
-			return nil, fmt.Errorf("spawn agent %s: %w", visible[i].Slug, err)
+			l.recordPaneSpawnFailure(visible[i].Slug, fmt.Sprintf("claudeCommand: %v", err))
+			continue
 		}
-		// Split from the last agent pane
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "split-window",
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window",
 			"-t", l.sessionName+":team.1",
 			"-c", l.cwd,
 			agentCmd,
-		).Run()
+		).CombinedOutput()
+		if err != nil {
+			detail := strings.TrimSpace(string(out))
+			reason := err.Error()
+			if detail != "" {
+				reason = fmt.Sprintf("%s (tmux: %s)", reason, detail)
+			}
+			fmt.Fprintf(os.Stderr,
+				"  Agents:  visible pane for %s failed to spawn; falling back to headless (%s)\n",
+				visible[i].Slug, reason,
+			)
+			l.recordPaneSpawnFailure(visible[i].Slug, reason)
+		}
 	}
 
 	// Apply tiled layout to agent panes, but keep channel (pane 0) as main-vertical
@@ -3014,19 +3101,106 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 
 func (l *Launcher) spawnOverflowAgents() {
 	for _, member := range l.overflowOfficeMembers() {
+		// Codex-bound agents use the headless codex pipeline; they don't need
+		// a claude pane. Creating one would launch `claude` with the wrong
+		// model and quota semantics.
+		if l.memberEffectiveProviderKind(member.Slug) == provider.KindCodex {
+			continue
+		}
 		agentCmd, err := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "spawn overflow agent %s: %v\n", member.Slug, err)
+			l.recordPaneSpawnFailure(member.Slug, fmt.Sprintf("claudeCommand: %v", err))
 			continue
 		}
 		windowName := overflowWindowName(member.Slug)
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "new-window", "-d",
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "new-window", "-d",
 			"-t", l.sessionName,
 			"-n", windowName,
 			"-c", l.cwd,
 			agentCmd,
-		).Run()
+		).CombinedOutput()
+		if err != nil {
+			detail := strings.TrimSpace(string(out))
+			reason := err.Error()
+			if detail != "" {
+				reason = fmt.Sprintf("%s (tmux: %s)", reason, detail)
+			}
+			fmt.Fprintf(os.Stderr,
+				"  Agents:  overflow pane for %s failed to spawn; falling back to headless for this agent (%s)\n",
+				member.Slug, reason,
+			)
+			l.recordPaneSpawnFailure(member.Slug, reason)
+		}
 	}
+}
+
+// detectDeadPanesAfterSpawn waits briefly for fresh panes to either settle
+// into claude (alive) or die on launch (e.g. shell parse error, missing
+// binary, interactive auth prompt that exits). For any pane found dead, we
+// capture its history, log it to stderr, post a visible notice to #general,
+// and mark the slug as failed so dispatch falls back to headless. Without
+// this, pane deaths were invisible: the pane showed no process, but the
+// agent appeared in the UI as "live" forever, and every dispatch ran into
+// a wall.
+//
+// Runs in a goroutine because tmux needs a moment to finish the respawn
+// and detect process exit before pane_dead reflects the truth.
+func (l *Launcher) detectDeadPanesAfterSpawn(members []officeMember) {
+	if !l.paneBackedAgents && l.sessionName == "" {
+		return
+	}
+	time.Sleep(1500 * time.Millisecond)
+	targets := l.agentPaneTargets()
+	for _, m := range members {
+		target, ok := targets[m.Slug]
+		if !ok || target.PaneTarget == "" {
+			continue
+		}
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "display-message",
+			"-t", target.PaneTarget,
+			"-p", "#{pane_dead}",
+		).CombinedOutput()
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(out)) != "1" {
+			continue
+		}
+		history, _ := exec.Command("tmux", "-L", tmuxSocketName, "capture-pane",
+			"-t", target.PaneTarget,
+			"-p", "-J", "-S", "-200",
+		).CombinedOutput()
+		snippet := strings.TrimSpace(string(history))
+		if len(snippet) > 400 {
+			snippet = snippet[:400] + "…"
+		}
+		fmt.Fprintf(os.Stderr,
+			"  Agents:  pane for %s (%s) died on launch — falling back to headless. Last output: %q\n",
+			m.Slug, target.PaneTarget, snippet,
+		)
+		l.recordPaneSpawnFailure(m.Slug, "pane died on launch; last output: "+snippet)
+		if l.broker != nil {
+			l.broker.PostSystemMessage("general",
+				fmt.Sprintf("Agent @%s didn't start cleanly; running in headless fallback. Check the launcher log for details.", m.Slug),
+				"runtime",
+			)
+		}
+	}
+}
+
+// recordPaneSpawnFailure marks a slug so agentPaneTargets() omits it and the
+// pane-capture loops never try to read from a non-existent target. The agent
+// still receives messages via the headless dispatch fallback.
+func (l *Launcher) recordPaneSpawnFailure(slug, reason string) {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return
+	}
+	if l.failedPaneSlugs == nil {
+		l.failedPaneSlugs = make(map[string]string)
+	}
+	l.failedPaneSlugs[slug] = reason
 }
 
 // trySpawnWebAgentPanes attempts to create a detached tmux session with one
@@ -3087,6 +3261,10 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 	l.spawnOverflowAgents()
 
 	l.paneBackedAgents = true
+	// Catch panes that tmux accepted but whose inner shell/claude exited
+	// immediately. Runs in a goroutine so we don't block startup — see
+	// detectDeadPanesAfterSpawn for details.
+	go l.detectDeadPanesAfterSpawn(append(l.visibleOfficeMembers(), l.overflowOfficeMembers()...))
 	fmt.Printf("  Agents:  interactive Claude panes in tmux session %q (uses subscription quota)\n", l.sessionName)
 }
 
