@@ -2025,12 +2025,37 @@ func (b *Broker) ServeWebUI(port int) {
 			"broker_url": brokerURL,
 		})
 	})))
-	mux.Handle("/", fileServer)
+	// Cache policy: index.html must be re-fetched every load so users pick up
+	// new JS/CSS bundle hashes immediately after an upgrade. Hashed assets
+	// under /assets/ are content-addressed and safe to cache aggressively.
+	// Without this, users stay pinned to a stale bundle for days because
+	// Chrome's heuristic cache revalidates HTML only occasionally.
+	mux.Handle("/", cacheControlMiddleware(fileServer))
 	go func() {
 		if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("broker web UI proxy: listen on :%d: %v", port, err)
 		}
 	}()
+}
+
+// cacheControlMiddleware sets conservative cache headers on the web UI so
+// clients always receive fresh HTML and mutable assets, while long-cached
+// hashed bundles under /assets/ stay immutable for efficiency.
+func cacheControlMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.HasPrefix(path, "/assets/"):
+			// Vite bundles hashed filenames; they never change for a given URL.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		default:
+			// Everything else (index.html, themes/*.css, favicons that share a
+			// stable path) must re-validate on each load so upgrades land
+			// immediately.
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (b *Broker) webUIProxyHandler(brokerURL, stripPrefix string) http.Handler {
@@ -3268,6 +3293,37 @@ func memberFromSpec(spec company.MemberSpec, createdBy, createdAt string, builtI
 		BuiltIn:        builtIn,
 		Provider:       spec.Provider,
 	}
+}
+
+// mentionPattern matches @slug tokens in free-form message text. Slugs are
+// alphanumeric plus hyphen, 2–30 chars (to dodge false positives from
+// conversational @ use). A preceding word character (e.g. email "a@b.com")
+// is excluded via the lookahead-free alternative: we anchor to start of
+// string or a non-alphanumeric rune.
+var mentionPattern = regexp.MustCompile(`(?:^|[^a-zA-Z0-9_])@([a-z0-9][a-z0-9-]{1,29})\b`)
+
+// extractMentionedSlugs pulls @-mention slugs out of body content. Duplicates
+// are removed. The caller is responsible for validating whether each slug is
+// a real office member.
+func extractMentionedSlugs(content string) []string {
+	matches := mentionPattern.FindAllStringSubmatch(strings.ToLower(content), -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(matches))
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		slug := m[1]
+		if _, ok := seen[slug]; ok {
+			continue
+		}
+		seen[slug] = struct{}{}
+		out = append(out, slug)
+	}
+	return out
 }
 
 func uniqueSlugs(items []string) []string {
@@ -6887,7 +6943,32 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
 	}
+	// Auto-promote @slug mentions in the body into the tagged array for
+	// agent posts. Agents routinely write "@operator please handle X" and
+	// forget to set `tagged`, which means @operator never wakes up. Human
+	// messages are left alone — humans intentionally type @-references
+	// conversationally and may not want every one to fire a notification.
 	tagged := uniqueSlugs(body.Tagged)
+	if body.From != "" && body.From != "you" && body.From != "human" && body.From != "system" {
+		for _, slug := range extractMentionedSlugs(body.Content) {
+			if slug == body.From {
+				continue
+			}
+			if b.findMemberLocked(slug) == nil {
+				continue
+			}
+			already := false
+			for _, t := range tagged {
+				if t == slug {
+					already = true
+					break
+				}
+			}
+			if !already {
+				tagged = append(tagged, slug)
+			}
+		}
+	}
 	for _, taggedSlug := range tagged {
 		switch taggedSlug {
 		case "you", "human", "system":

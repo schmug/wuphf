@@ -3,11 +3,26 @@ import { useMessages } from '../../hooks/useMessages'
 import { useAppStore } from '../../stores/app'
 import { MessageBubble } from './MessageBubble'
 import { formatDateLabel } from '../../lib/format'
+import type { Message } from '../../api/client'
 
 function dateDayKey(ts: string): string {
   const d = new Date(ts)
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
 }
+
+type ThreadMessage = {
+  message: Message
+  grouped: boolean
+}
+
+type FeedElement =
+  | { type: 'date'; key: string; label: string }
+  | {
+      type: 'thread'
+      key: string
+      parent: ThreadMessage
+      replies: ThreadMessage[]
+    }
 
 export function MessageFeed() {
   const currentChannel = useAppStore((s) => s.currentChannel)
@@ -53,30 +68,32 @@ export function MessageFeed() {
     )
   }
 
-  // Build message list with date separators and grouping
-  const elements: Array<{ type: 'date'; key: string; label: string } | { type: 'message'; key: string; message: typeof messages[0]; grouped: boolean }> = []
+  // Build thread-aware element list. Top-level channel messages become thread
+  // heads; direct replies become their children; deep-thread replies stay in
+  // the side panel. Grouping by sender + 5-min window applies both to parents
+  // and to consecutive replies within the same thread so long exchanges read
+  // as one continuous block.
+  const elements: FeedElement[] = []
+  const byId = new Map<string, Message>()
+  for (const m of messages) byId.set(m.id, m)
+
+  const repliesByParent = new Map<string, Message[]>()
+  for (const msg of messages) {
+    if (msg.content?.startsWith('[STATUS]')) continue
+    if (!msg.reply_to) continue
+    const parent = byId.get(msg.reply_to)
+    if (!parent) continue
+    if (parent.reply_to) continue // deep thread lives in the side panel
+    const list = repliesByParent.get(parent.id) ?? []
+    list.push(msg)
+    repliesByParent.set(parent.id, list)
+  }
+
   let lastDate = ''
   let lastFrom = ''
   let lastTime = ''
 
-  for (const msg of messages) {
-    // Skip status messages from main feed grouping logic
-    if (msg.content?.startsWith('[STATUS]')) continue
-    // Skip reply messages in main feed
-    if (msg.reply_to) continue
-
-    // Date separator
-    if (msg.timestamp) {
-      const dayKey = dateDayKey(msg.timestamp)
-      if (dayKey !== lastDate) {
-        elements.push({ type: 'date', key: `date-${dayKey}`, label: formatDateLabel(msg.timestamp) })
-        lastDate = dayKey
-        lastFrom = ''
-        lastTime = ''
-      }
-    }
-
-    // Grouping: same sender within 5 minutes
+  const wrap = (msg: Message): ThreadMessage => {
     let grouped = false
     if (lastFrom === msg.from && msg.timestamp && lastTime) {
       const delta = new Date(msg.timestamp).getTime() - new Date(lastTime).getTime()
@@ -84,8 +101,39 @@ export function MessageFeed() {
     }
     lastFrom = msg.from
     lastTime = msg.timestamp || lastTime
+    return { message: msg, grouped }
+  }
 
-    elements.push({ type: 'message', key: msg.id, message: msg, grouped })
+  const maybeEmitDateSeparator = (msg: Message) => {
+    if (!msg.timestamp) return
+    const dayKey = dateDayKey(msg.timestamp)
+    if (dayKey === lastDate) return
+    elements.push({ type: 'date', key: `date-${dayKey}`, label: formatDateLabel(msg.timestamp) })
+    lastDate = dayKey
+    lastFrom = ''
+    lastTime = ''
+  }
+
+  for (const msg of messages) {
+    if (msg.content?.startsWith('[STATUS]')) continue
+    if (msg.reply_to) continue // only top-level messages seed threads
+
+    maybeEmitDateSeparator(msg)
+    const parent = wrap(msg)
+
+    const rawReplies = repliesByParent.get(msg.id) ?? []
+    const replies: ThreadMessage[] = []
+    for (const r of rawReplies) {
+      maybeEmitDateSeparator(r)
+      replies.push(wrap(r))
+    }
+
+    elements.push({
+      type: 'thread',
+      key: `thread-${msg.id}`,
+      parent,
+      replies,
+    })
   }
 
   return (
@@ -100,13 +148,31 @@ export function MessageFeed() {
             </div>
           )
         }
+        const hasReplies = el.replies.length > 0
         return (
-          <MessageBubble
+          <div
             key={el.key}
-            message={el.message}
-            grouped={el.grouped}
-            onThreadClick={(id) => setActiveThreadId(id)}
-          />
+            className={`thread-group${hasReplies ? ' thread-group-has-replies' : ''}`}
+          >
+            <MessageBubble
+              message={el.parent.message}
+              grouped={el.parent.grouped}
+              onThreadClick={(id) => setActiveThreadId(id)}
+            />
+            {hasReplies && (
+              <div className="thread-replies">
+                {el.replies.map((r) => (
+                  <MessageBubble
+                    key={r.message.id}
+                    message={r.message}
+                    grouped={r.grouped}
+                    isReply
+                    onThreadClick={(id) => setActiveThreadId(id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         )
       })}
     </div>
