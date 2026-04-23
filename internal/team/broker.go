@@ -913,14 +913,16 @@ func NewBroker() *Broker {
 	b.normalizeLoadedStateLocked()
 	b.mu.Unlock()
 	b.stopCh = make(chan struct{})
-	// Watchdog: reap agents stuck in "active"/"thinking" when the spawn
-	// crashed before reaching the idle transition. Stopped via b.stopCh.
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		<-b.stopCh
-		cancel()
-	}()
-	go b.runActivityWatchdog(ctx)
+	if activityWatchdogEnabled {
+		// Watchdog: reap agents stuck in "active"/"thinking" when the spawn
+		// crashed before reaching the idle transition. Stopped via b.stopCh.
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			<-b.stopCh
+			cancel()
+		}()
+		go b.runActivityWatchdog(ctx)
+	}
 	return b
 }
 
@@ -1245,6 +1247,12 @@ func uniqueWordSet(s string) map[string]struct{} {
 	}
 	return out
 }
+
+// activityWatchdogEnabled controls whether NewBroker starts the background
+// activity-watchdog goroutine. Tests that create many short-lived brokers set
+// this to false via TestMain so goroutines don't accumulate and cause
+// goleak/timeout failures. Production always runs with the default (true).
+var activityWatchdogEnabled = true
 
 // staleActivityThreshold is how long an agent can stay in a non-idle/non-error
 // activity state before the watchdog forcibly resets it to idle. Set long

@@ -82,6 +82,13 @@ func TestMain(m *testing.M) {
 	staleUnansweredThreshold = 10 * 365 * 24 * time.Hour
 	cleanups = append(cleanups, func() { staleUnansweredThreshold = origStaleUnanswered })
 
+	// 4) Activity watchdog: tests create many short-lived brokers. The watchdog
+	//    goroutine fires every minute, so leaving it running accumulates
+	//    hundreds of stuck goroutines and causes timeout/goleak failures.
+	//    Disable it for the test run; production always starts with it enabled.
+	activityWatchdogEnabled = false
+	cleanups = append(cleanups, func() { activityWatchdogEnabled = true })
+
 	rc := m.Run()
 	cleanup()
 	os.Exit(rc)

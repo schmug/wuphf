@@ -204,8 +204,9 @@ func TestOfficeMembersSnapshotPrefersPersistedStateOverPack(t *testing.T) {
 
 func TestNotificationTargetsForMessageOneOnOneWakesSelectedAgent(t *testing.T) {
 	l := &Launcher{
-		sessionMode: SessionModeOneOnOne,
-		oneOnOne:    "pm",
+		sessionMode:      SessionModeOneOnOne,
+		oneOnOne:         "pm",
+		paneBackedAgents: true, // test exercises the pane-target path specifically
 	}
 
 	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
@@ -2647,8 +2648,9 @@ func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) 
 	b.mu.Unlock()
 
 	l := &Launcher{
-		broker:      b,
-		sessionName: "office-test",
+		broker:           b,
+		sessionName:      "office-test",
+		paneBackedAgents: true, // test exercises the pane-target path specifically
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
 			Agents: []agent.AgentConfig{
@@ -2713,8 +2715,9 @@ func TestOfficeChangeTaskNotificationsBackfillChannelMembershipTask(t *testing.T
 	b.mu.Unlock()
 
 	l := &Launcher{
-		broker:      b,
-		sessionName: "office-test",
+		broker:           b,
+		sessionName:      "office-test",
+		paneBackedAgents: true, // test exercises the pane-target path specifically
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
 			Agents: []agent.AgentConfig{
@@ -2816,9 +2819,9 @@ func TestBuildMessageActiveAgentsSorted(t *testing.T) {
 			},
 		},
 		headlessActive: map[string]*headlessCodexActiveTurn{
-			"zebra":  {},
-			"alpha":  {},
-			"mango":  {},
+			"zebra": {},
+			"alpha": {},
+			"mango": {},
 		},
 		headlessQueues: make(map[string][]headlessCodexTurn),
 	}

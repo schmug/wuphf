@@ -1856,6 +1856,15 @@ func (l *Launcher) resolvePaneTargetForSlug(slug string) (string, bool) {
 
 func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
 	targets := make(map[string]notificationTarget)
+	// Pane targets only make sense when tmux panes actually back the agents.
+	// Otherwise every PaneTarget string we return is a ghost pointing at a
+	// non-existent pane — and downstream code (agentNotificationTargets,
+	// shouldUseHeadlessDispatchForTarget) treats the non-empty PaneTarget as
+	// "pane path", which bypasses the headless dispatcher and types into a
+	// dead tmux session that silently drops every notification.
+	if l == nil || !l.paneBackedAgents {
+		return targets
+	}
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
 		if slug != "" && !l.skipPaneForSlug(slug) {
