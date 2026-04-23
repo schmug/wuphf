@@ -380,7 +380,30 @@ func blankSlateOfficeMembersFromBlueprint(blueprint operations.Blueprint, select
 	agents := blueprint.Starter.Agents
 	leadSlug := normalizeChannelSlug(blueprint.Starter.LeadSlug)
 	filter := agentSelectionFilter(selectedAgents, leadSlug)
+	availableSlugs := starterAgentSlugSet(agents)
 
+	members := blankSlateOfficeMembersFromAgents(agents, leadSlug, filter)
+	// A stale web bundle can post scratch-team slugs from a different
+	// synthesized roster. In that case the filter keeps only the lead; prefer
+	// the full current roster over a misleading one-agent office.
+	if selectionLooksStaleForStarterAgents(selectedAgents, leadSlug, availableSlugs, members) {
+		members = blankSlateOfficeMembersFromAgents(agents, leadSlug, nil)
+	}
+	if len(members) > 0 {
+		return members
+	}
+	// Defensive fallback used only when the blueprint had zero parseable
+	// agents. Keeps the broker from crashing on empty rosters.
+	now := time.Now().UTC().Format(time.RFC3339)
+	return []officeMember{
+		{Slug: "founder", Name: "Founder", Role: "Founder", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "auto", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
+	}
+}
+
+func blankSlateOfficeMembersFromAgents(agents []operations.StarterAgent, leadSlug string, filter func(string) bool) []officeMember {
 	members := make([]officeMember, 0, len(agents))
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, agent := range agents {
@@ -412,17 +435,44 @@ func blankSlateOfficeMembersFromBlueprint(blueprint operations.Blueprint, select
 			BuiltIn:        agent.BuiltIn || slug == leadSlug || slug == "operator" || slug == "founder" || slug == "ceo",
 		})
 	}
-	if len(members) > 0 {
-		return members
+	return members
+}
+
+func starterAgentSlugSet(agents []operations.StarterAgent) map[string]struct{} {
+	out := make(map[string]struct{}, len(agents))
+	for _, agent := range agents {
+		slug := normalizeChannelSlug(operationFirstNonEmpty(agent.Slug, agent.EmployeeBlueprint, operationSlug(agent.Name)))
+		if slug == "" {
+			continue
+		}
+		out[slug] = struct{}{}
 	}
-	// Defensive fallback used only when the blueprint had zero parseable
-	// agents. Keeps the broker from crashing on empty rosters.
-	return []officeMember{
-		{Slug: "founder", Name: "Founder", Role: "Founder", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "auto", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
-		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
+	return out
+}
+
+func selectionLooksStaleForStarterAgents(selectedAgents []string, leadSlug string, availableSlugs map[string]struct{}, members []officeMember) bool {
+	if len(selectedAgents) == 0 || len(members) != 1 {
+		return false
 	}
+	if leadSlug == "" || members[0].Slug != leadSlug {
+		return false
+	}
+	hasUnknown := false
+	hasKnownNonLead := false
+	for _, raw := range selectedAgents {
+		slug := normalizeChannelSlug(raw)
+		if slug == "" {
+			continue
+		}
+		if _, ok := availableSlugs[slug]; !ok {
+			hasUnknown = true
+			continue
+		}
+		if slug != leadSlug {
+			hasKnownNonLead = true
+		}
+	}
+	return hasUnknown && !hasKnownNonLead
 }
 
 // agentSelectionFilter returns a membership predicate for the wizard's
