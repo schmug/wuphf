@@ -328,8 +328,33 @@ func (l *Launcher) writeHeadlessOpencodeMCPConfig(slug string) error {
 	if err != nil {
 		return fmt.Errorf("marshal opencode.json: %w", err)
 	}
-	if err := os.WriteFile(configPath, data, 0o600); err != nil {
-		return fmt.Errorf("write opencode.json: %w", err)
+	// Write atomically via a temp file in the same directory so that concurrent
+	// agent spawns (CEO + planner + reviewer all launch at once) never interleave
+	// their writes and produce a truncated or double-braced JSON file.
+	// os.Rename on the same filesystem is atomic (POSIX), so readers always see
+	// either the old complete file or the new complete file — never a half-write.
+	tmp, err := os.CreateTemp(filepath.Dir(configPath), ".opencode-*.json")
+	if err != nil {
+		return fmt.Errorf("create temp opencode config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("chmod temp opencode config: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write temp opencode config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close temp opencode config: %w", err)
+	}
+	if err := os.Rename(tmpPath, configPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("install opencode.json: %w", err)
 	}
 	return nil
 }
