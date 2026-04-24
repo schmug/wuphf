@@ -15,6 +15,23 @@ pre-commit:
         - "bun.lock"
         - "web/bun.lock"
 
+    biome:
+      # biome runs against staged web/** files only — it's scoped to web/
+      # because that's where biome.json lives. `root: web` chdirs lefthook
+      # into web/ so {staged_files} arrives as paths relative to web/;
+      # stage_fixed=true re-stages formatter + safe-autofix changes so the
+      # commit includes them.
+      root: web
+      glob: "**/*.{js,ts,jsx,tsx,json,css}"
+      run: bunx --bun biome check --write --max-diagnostics=500 {staged_files}
+      stage_fixed: true
+      exclude:
+        - "dist/**"
+        - "node_modules/**"
+        - "bun.lock"
+        - "**/*.gen.ts"
+        - "**/*.gen.tsx"
+
     gofmt:
       glob: "*.go"
       run: |
@@ -60,7 +77,13 @@ pre-commit:
         [ "$fail" -eq 0 ]
 
 pre-push:
-  parallel: true
+  # Serial, not parallel: running `go test ./...`, `go build ./cmd/wuphf`,
+  # and `vhs` concurrently contends for disk/CPU on workstations, and
+  # internal/team's wiki worker queue saturates under that load
+  # ("playbook: compile write timed out after 10s", "wiki: queue saturated,
+  # retry on next turn"). Same tests pass reliably when run sequentially.
+  # Until the wiki worker is bounded-queue-tolerant, keep pre-push serial.
+  parallel: false
   commands:
     test:
       # internal/team's former test-isolation bugs (shared ~/.wuphf/wiki,
