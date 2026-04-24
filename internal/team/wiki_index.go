@@ -161,8 +161,17 @@ type FactStore interface {
 	// typed-predicate graph walk and counterfactual rewrite (Slice 2 Thread A).
 	ListFactsByTriplet(ctx context.Context, subject, predicate, objectPrefix string) ([]TypedFact, error)
 
-	CanonicalHashFacts(ctx context.Context) (string, error) // §7.4 rebuild check
-	CanonicalHashAll(ctx context.Context) (string, error)   // §7.4 composite: facts + entities + edges + redirects
+	// CanonicalHashFacts returns a stable hash over all indexed facts for
+	// the §7.4 rebuild contract. ReinforcedAt is EXCLUDED from the hash
+	// input so two extraction runs on the same artifact (the second one
+	// purely bumps reinforced_at) produce identical hashes. Use
+	// CanonicalHashAll for end-to-end drift detection where ReinforcedAt
+	// participates.
+	CanonicalHashFacts(ctx context.Context) (string, error)
+	// CanonicalHashAll is the composite §7.4 hash over facts + entities +
+	// edges + redirects. ReinforcedAt IS included here so the hash advances
+	// whenever any layer (including reinforcement) changes.
+	CanonicalHashAll(ctx context.Context) (string, error)
 	Close() error
 }
 
@@ -509,7 +518,7 @@ func (w *WikiIndex) CanonicalHashAll(ctx context.Context) (string, error) {
 // --- path routing helpers -------------------------------------------------
 
 var (
-	factLogNewSchema = regexp.MustCompile(`^wiki/facts/[^/]+/[^/]+\.jsonl$`)
+	factLogNewSchema = regexp.MustCompile(`^wiki/facts/[a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*\.jsonl$`)
 	factLogLegacyV12 = regexp.MustCompile(`^team/entities/[a-z]+-[a-z0-9][a-z0-9-]*\.facts\.jsonl$`)
 	entityBriefPath  = regexp.MustCompile(`^team/[^/]+/[^/]+\.md$`)
 	lintReportPath   = regexp.MustCompile(`^wiki/\.lint/report-\d{4}-\d{2}-\d{2}\.md$`)
@@ -557,6 +566,19 @@ func (w *WikiIndex) reconcileFactLog(ctx context.Context, abs, relPath string) e
 			continue // legacy rows without IDs are skipped; a later synth will re-emit them with IDs
 		}
 		_ = i
+		// Preserve the in-memory ReinforcedAt marker. It is a derived runtime
+		// signal — NOT written to the JSONL substrate by design (§7.3
+		// reinforcement bumps only the in-memory row; the original JSONL line
+		// still represents the authoritative source-of-truth for the fact's
+		// content). Reconcile is the rebuild path — it must carry forward the
+		// reinforcement bump a parallel SubmitFacts may have landed AFTER the
+		// JSONL line was written. Clobbering it would silently un-reinforce
+		// facts on every post-append reconcile side goroutine, breaking §7.3.
+		if f.ReinforcedAt == nil {
+			if existing, ok, _ := w.store.GetFact(ctx, f.ID); ok && existing.ReinforcedAt != nil {
+				f.ReinforcedAt = existing.ReinforcedAt
+			}
+		}
 		if err := w.store.UpsertFact(ctx, f); err != nil {
 			return fmt.Errorf("upsert fact %s: %w", f.ID, err)
 		}
@@ -1004,7 +1026,12 @@ func (s *inMemoryFactStore) CanonicalHashFacts(_ context.Context) (string, error
 	sort.Strings(ids)
 	h := sha256.New()
 	for _, id := range ids {
-		b, err := json.Marshal(s.facts[id])
+		// ReinforcedAt is excluded from the facts hash so repeated extraction
+		// runs that only bump reinforced_at do not drift the hash. End-to-end
+		// drift detection lives in CanonicalHashAll.
+		clone := s.facts[id]
+		clone.ReinforcedAt = nil
+		b, err := json.Marshal(clone)
 		if err != nil {
 			return "", err
 		}
