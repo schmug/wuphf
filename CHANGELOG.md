@@ -2,7 +2,7 @@
 
 All notable changes to WUPHF will be documented in this file.
 
-## [Unreleased]
+## [0.0.8] - 2026-04-26
 
 ### Fixed
 
